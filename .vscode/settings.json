@@ -1,0 +1,6 @@
+{
+    "terminal.integrated.env.windows": {
+        "RUST_LOG": "debug",
+        "RUST_BACKTRACE": "1",
+    }
+}
