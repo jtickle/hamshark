@@ -1,6 +1,8 @@
 use std::thread;
 use std::sync::mpsc;
 
+use log::{debug, info};
+
 use crate::data::audioinput::AudioInput;
 
 pub mod data;
@@ -33,6 +35,7 @@ pub enum HamSharkError {
 pub type HamSharkResult = Result<(), HamSharkError>;
 
 fn main_loop(cmd_chan: mpsc::Receiver<HamSharkCommand>) {
+    info!("Hamshark Main Loop Started");
     let mut running = true;
     let mut count = 0;
     loop {
@@ -56,13 +59,13 @@ fn main_loop(cmd_chan: mpsc::Receiver<HamSharkCommand>) {
 
         if running {
             count += 1;
-            println!("Inside Thread: {}", count);
+            debug!("Inside Thread, count is {}", count);
 
             //let host = cpal::available_hosts
             // TODO: draw the rest of the owl
         }
     }
-    println!("Reached end of thread");
+    info!("Hamshark Main Loop Terminated");
 }
 
 impl HamShark {
@@ -105,7 +108,11 @@ impl HamShark {
         match self.issue_command(HamSharkCommand::Stop) {
             Ok(()) => {
                 // At this point if we can't join, it's a panic anyway.
-                self.join_handle.take().unwrap().join().unwrap();
+                self.join_handle
+                    .take()
+                    .expect("Did not have a join_handle when expected")
+                    .join()
+                    .expect("Could not join thread when expected");
                 Ok(())
             },
             Err(HamSharkCommandError::ChannelDisconnected) =>
@@ -120,7 +127,7 @@ impl HamShark {
     pub fn update_audio_input(&mut self, audio_input: AudioInput) {
         let was_started = self.is_started();
         if was_started  {
-            self.stop().unwrap();
+            self.stop().expect("was_started true but failed to stop");
         }
 
         self.audio_input = Some(audio_input);

@@ -31,7 +31,7 @@ impl fmt::Display for AudioInputBuilderSource {
 pub struct AudioInputBuilder {
     pub source: AudioInputBuilderSource,
     pub file: Option<PathBuf>,
-    pub host: Host,
+    pub host: HostId,
     pub device: Option<Device>,
     pub file_base_path: Option<PathBuf>,
     pub hosts: Vec<HostId>,
@@ -43,7 +43,7 @@ impl Clone for AudioInputBuilder {
         Self {
             source: self.source.clone(),
             file: self.file.clone(),
-            host: host_from_id(self.host.id()).unwrap(),
+            host: self.host.clone(),
             device: self.device.clone(),
             file_base_path:
             self.file_base_path.clone(),
@@ -64,7 +64,7 @@ impl Default for AudioInputBuilder {
         Self {
             source: AudioInputBuilderSource::FromDevice,
             file: None,
-            host,
+            host: host.id(),
             device,
             file_base_path: None,
             hosts,
@@ -89,7 +89,7 @@ impl AudioInputBuilder {
             },
             AudioInputBuilderSource::FromDevice => match &self.device {
                 Some(device) =>
-                    match host_from_id(self.host.id()) {
+                    match host_from_id(self.host) {
                         Ok(host) => Result::Ok(
                             AudioInput::FromDevice(
                                 AudioInputDevice {

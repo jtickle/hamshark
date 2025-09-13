@@ -41,6 +41,7 @@ pub trait View {
 impl eframe::App for HamSharkGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         CentralPanel::default().show(ctx, |ui| {
+            log::debug!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
             let color = if ui.visuals().dark_mode {
                 Color32::from_additive_luminance(196)
             } else {
@@ -63,7 +64,7 @@ impl eframe::App for HamSharkGui {
                         should_cancel = true;
                     });
                     if should_save {
-                        self.hamshark.update_audio_input(data.build().unwrap());
+                        self.hamshark.update_audio_input(data.build().expect("Failed to build AudioInput"));
                     } else if !should_cancel {
                         self.audio_input_selecting = Option::Some(data);
                     }
@@ -74,7 +75,7 @@ impl eframe::App for HamSharkGui {
             match self.hamshark.is_started() {
                 true => {
                     if ui.button("Stop").clicked() {
-                        self.hamshark.stop().unwrap();
+                        self.hamshark.stop();
                     }
 
                 },
