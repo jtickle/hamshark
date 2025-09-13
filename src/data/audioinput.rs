@@ -1,111 +1,92 @@
-use std::path::PathBuf;
-use std::fmt;
-
-use cpal::{available_hosts, default_host, host_from_id, traits::HostTrait, Device, Host, HostId};
+use std::fmt::Debug;
+use cpal::{default_host, host_from_id, traits::{DeviceTrait, HostTrait}, BufferSize, Device, Host, HostId, StreamConfig};
 
 pub struct AudioInputDevice {
     pub host: Host,
     pub device: Device,
+    pub config: StreamConfig,
 }
 
-pub enum AudioInput {
-    FromFile(PathBuf),
-    FromDevice(AudioInputDevice)
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum AudioInputBuilderSource {
-    FromFile,
-    FromDevice,
-}
-
-impl fmt::Display for AudioInputBuilderSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::FromFile => write!(f, "From File"),
-            Self::FromDevice => write!(f, "From Device")
-        }
+impl Debug for AudioInputDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioInputDevice")
+            .field("host", &self.host.id())
+            .field("device", &self.device.name())
+            .field("config", &self.config)
+            .finish()
     }
 }
 
-pub struct AudioInputBuilder {
-    pub source: AudioInputBuilderSource,
-    pub file: Option<PathBuf>,
-    pub host: HostId,
+impl PartialEq for AudioInputDevice {
+    fn eq(&self, other: &Self) -> bool {
+        self.host.id() == other.host.id() &&
+            self.device.name() == other.device.name() &&
+            self.config == other.config
+    }
+}
+
+#[derive(Clone)]
+pub struct AudioInputDeviceBuilder {
+    pub host_id: HostId,
     pub device: Option<Device>,
-    pub file_base_path: Option<PathBuf>,
-    pub hosts: Vec<HostId>,
-    pub devices: Vec<Device>,
+    pub config: Option<StreamConfig>,
 }
 
-impl Clone for AudioInputBuilder {
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source.clone(),
-            file: self.file.clone(),
-            host: self.host.clone(),
-            device: self.device.clone(),
-            file_base_path:
-            self.file_base_path.clone(),
-            hosts: self.hosts.clone(),
-            devices: self.devices.clone() }
-    }
-}
-
-impl Default for AudioInputBuilder {
+impl Default for AudioInputDeviceBuilder {
     fn default() -> Self {
-        let host = default_host();
-        let device = host.default_input_device();
-        let hosts = available_hosts();
-        let devices = match host.input_devices() {
-            Ok(devices) => devices.collect(),
-            Err(_) => Vec::<Device>::new(),
-        };
         Self {
-            source: AudioInputBuilderSource::FromDevice,
-            file: None,
-            host: host.id(),
-            device,
-            file_base_path: None,
-            hosts,
-            devices,
+            host_id: default_host().id(),
+            device: None,
+            config: None,
         }
+            .with_default_device()
+            .with_default_config()
     }
 }
 
 #[derive(Debug)]
 pub struct AudioInputBuilderIncomplete;
 
-impl AudioInputBuilder {
-    pub fn build(&self) -> Result<AudioInput, AudioInputBuilderIncomplete> {
-        match self.source {
-            AudioInputBuilderSource::FromFile => match &self.file {
-                Some(file) => Result::Ok(
-                    AudioInput::FromFile(file.clone())
-                ),
-                None => {
-                    Result::Err(AudioInputBuilderIncomplete{})
-                },
-            },
-            AudioInputBuilderSource::FromDevice => match &self.device {
-                Some(device) =>
-                    match host_from_id(self.host) {
-                        Ok(host) => Result::Ok(
-                            AudioInput::FromDevice(
-                                AudioInputDevice {
-                                    host,
-                                    device: device.clone()
-                                }
-                            )
-                        ),
-                        Err(_) => {
-                            Result::Err(AudioInputBuilderIncomplete{})
-                        },
-                    },
-                None => {
-                    Result::Err(AudioInputBuilderIncomplete{})
-                },
-            },
-        }
+impl AudioInputDeviceBuilder {
+    pub fn with_default_device(mut self) -> Self {
+        let host = host_from_id(self.host_id).expect("the host ID to have been set sensibly");
+        self.device = host.default_input_device();
+        self
+    }
+
+    pub fn with_default_config(mut self) -> Self {
+        self.config = self.device.clone().map(|device| {
+            let mut config = device.default_input_config()
+                .expect("there should be a default input config if there is a device")
+                .config();
+            config.buffer_size = BufferSize::Fixed(128);
+            config
+        });
+        self
+    }
+
+    pub fn input_devices(&self) -> Vec<Device> {
+        let host = host_from_id(self.host_id).expect("host must be set at this point");
+        host.input_devices().expect("host must have some input devices").collect()
+    }
+
+    pub fn build(&self) -> Result<AudioInputDevice, AudioInputBuilderIncomplete> {
+        let host = match host_from_id(self.host_id) {
+            Ok(host) => host,
+            Err(_) => return Result::Err(AudioInputBuilderIncomplete{}),
+        };
+        let device = match self.device.clone() {
+            Some(device) => device,
+            None => return Result::Err(AudioInputBuilderIncomplete{}),
+        };
+        let config = match self.config.clone() {
+            Some(config) => config,
+            None => return Result::Err(AudioInputBuilderIncomplete{}),
+        };
+        Ok(AudioInputDevice {
+            host,
+            device,
+            config
+        })
     }
 }

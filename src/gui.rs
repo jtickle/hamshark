@@ -5,31 +5,34 @@ use eframe::{
         containers::Frame, emath, epaint, lerp, pos2, remap, vec2, hex_color, CentralPanel, Color32, Context, Pos2, Rect
     }, epaint::PathStroke
 };
-use hamshark::HamShark;
-use hamshark::data::audioinput::AudioInputBuilder;
-
+use crate::{data::audioinput::AudioInputDeviceBuilder, session::Session};
 use crate::config::{Configuration, Settings};
+
+use open;
+
+const GPLV3: &str = "https://www.gnu.org/licenses/gpl-3.0.en.html";
+const REPO: &str = "https://git.serenity.jefftickle.com/jwt/hamshark";
 
 pub struct HamSharkGui {
     colors: bool,
-    hamshark: HamShark,
 
+    session: Session,
     config: Configuration,
     settings: Settings,
 
-    audio_input_selecting: Option<AudioInputBuilder>,
-    audio_input: AudioInputBuilder,
+    audio_input_selecting: Option<AudioInputDeviceBuilder>,
+    audio_input: AudioInputDeviceBuilder,
 }
 
 impl HamSharkGui {
-    pub fn new(hs: HamShark, config: Configuration, settings: Settings) -> Self {
+    pub fn new(session: Session, config: Configuration, settings: Settings) -> Self {
         Self {
             colors: true,
-            hamshark: hs,
-            config: config,
-            settings: settings,
+            session,
+            config,
+            settings,
             audio_input_selecting: None,
-            audio_input: AudioInputBuilder::default(),
+            audio_input: AudioInputDeviceBuilder::default(),
         }
     }
 }
@@ -40,8 +43,27 @@ pub trait View {
 
 impl eframe::App for HamSharkGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                let path = self.session.path.to_str();
+                ui.label(format!("Live Session: {}", path.unwrap_or("OS STR DECODE ERROR")));
+                if let Some(p) = path {
+                    if ui.button("Browse").clicked() {
+                        open::that(p).expect(format!("Could not open {}", p).as_str());
+                    }
+                }
+                ui.separator();
+                if ui.button("GPLv3").clicked() {
+                    open::that(GPLV3).expect(format!("Could not open browser to GPLv3 at {} ... fortunately this software is open source, so you can fix that bug!", GPLV3).as_str());
+                }
+                ui.separator();
+                if ui.button("Source").clicked() {
+                    open::that(REPO).expect(format!("Could not open browser to code repository at {} ... fortunately this software is open source, so you ca nfix that bug!", REPO).as_str());
+                }
+            })
+        });
         CentralPanel::default().show(ctx, |ui| {
-            log::debug!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
+            log::trace!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
             let color = if ui.visuals().dark_mode {
                 Color32::from_additive_luminance(196)
             } else {
@@ -64,7 +86,8 @@ impl eframe::App for HamSharkGui {
                         should_cancel = true;
                     });
                     if should_save {
-                        self.hamshark.update_audio_input(data.build().expect("Failed to build AudioInput"));
+                        
+                        //self.hamshark.update_audio_input(data.build().expect("Failed to build AudioInput"));
                     } else if !should_cancel {
                         self.audio_input_selecting = Option::Some(data);
                     }
@@ -72,28 +95,19 @@ impl eframe::App for HamSharkGui {
                 None => (),
             }
 
-            match self.hamshark.is_started() {
+            match self.session.is_started() {
                 true => {
                     if ui.button("Stop").clicked() {
-                        self.hamshark.stop();
+                        self.session.stop().unwrap();
                     }
 
                 },
                 false => {
                     if ui.button("Start").clicked() {
-                        self.hamshark.start();
+                        self.session.start().unwrap();
                     }
                 }
             }
-
-            /*let hosts = cpal::available_hosts();
-            let selected_host = hosts[0].name().to_owned().as_mut_str();
-            egui::ComboBox::from_label("Host")
-                .show_ui(ui, |ui| {
-                    cpal::available_hosts().into_iter().map(|host| {
-                        ui.selectable_value(selected_host, host.name(), host.name());
-                    })
-                });*/
 
             Frame::canvas(ui.style()).show(ui, |ui| {
                 ui.ctx().request_repaint();

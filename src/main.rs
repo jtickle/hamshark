@@ -1,11 +1,13 @@
-use hamshark::HamShark;
+use crate::data::audioinput::AudioInputDeviceBuilder;
 use crate::gui::HamSharkGui;
 use crate::config::{Configuration, Settings};
+use crate::session::Session;
 use log::{debug};
 
 mod gui;
 mod config;
-pub mod data;
+mod session;
+mod data;
 fn main() -> eframe::Result<()>{
     env_logger::init();
     let native_options = eframe::NativeOptions::default();
@@ -15,12 +17,12 @@ fn main() -> eframe::Result<()>{
     debug!("{:?}", config);
     let settings = Settings::from_file(config.settings_file_path.as_path()).unwrap();
     debug!("{:?}", settings);
-
-    let hs = HamShark::new();
+    let mut session = Session::from_settings(&settings).expect("Able to create session");
+    session.configure(AudioInputDeviceBuilder::default().build().unwrap()).unwrap();
 
     eframe::run_native(
         "Hamshark",
         native_options,
-        Box::new(|_cc| Ok(Box::new(HamSharkGui::new(hs, config, settings)))))
+        Box::new(|_cc| Ok(Box::new(HamSharkGui::new(session, config, settings)))))
 }
 

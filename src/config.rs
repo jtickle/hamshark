@@ -30,7 +30,7 @@ pub type ConfigurationResult = Result<Configuration, ConfigurationError>;
 // User-defined settings. Try to determine sensible defaults.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Settings {
-    session_base_dir: Option<PathBuf>,
+    pub session_base_dir: PathBuf,
 }
 
 #[derive(Debug, Error)]
@@ -104,16 +104,17 @@ impl Settings {
 
     pub fn from_sensible_defaults() -> Settings {
         Self {
-            session_base_dir: Self::suggest_session_base_dir(),
+            session_base_dir: Self::determine_session_base_dir(),
         }
     }
 
-    pub fn suggest_session_base_dir() -> Option<PathBuf> {
+    pub fn determine_session_base_dir() -> PathBuf {
+        // Get OS-specific document dir and create a directory named Hamshark
         UserDirs::new().map(|user_dirs| {
             user_dirs.document_dir().map(|doc_dir| {
-                PathBuf::from(doc_dir).join(SETTINGSFILE)
+                PathBuf::from(doc_dir).join(APPLICATION)
             })
-        }).flatten()
+        }).flatten().expect("Could not determine OS base dir")
     }
 
     pub fn save(&self, file: &Path) -> SettingsResult {

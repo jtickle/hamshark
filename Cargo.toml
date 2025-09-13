@@ -5,13 +5,17 @@ edition = "2024"
 
 [dependencies]
 audio_thread_priority = "0.34.0"
+chrono = "0.4.42"
 cpal = { version = "0.16.0", features = ["audio_thread_priority"] }
 directories = "6.0.0"
 eframe = "0.32.1"
 egui = { version = "0.32.1", features = ["color-hex"] }
 env_logger = "0.11.8"
 log = "0.4.28"
+open = "5.3.2"
+parking_lot = "0.12.4"
 rfd = "0.15.4"
+rustfft = "6.4.0"
 serde = "1.0.219"
 thiserror = "2.0.16"
 toml = "0.9.5"
