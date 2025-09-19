@@ -1,10 +1,13 @@
 mod audioinput;
+mod amplitudes;
 
 use eframe::{
     egui::{
         containers::Frame, emath, epaint, lerp, pos2, remap, vec2, hex_color, CentralPanel, Color32, Context, Pos2, Rect
     }, epaint::PathStroke
 };
+use egui::{ColorImage, Image, ScrollArea, TextureOptions};
+use log::{debug, trace};
 use crate::{data::audioinput::AudioInputDeviceBuilder, session::Session};
 use crate::config::{Configuration, Settings};
 
@@ -14,25 +17,20 @@ const GPLV3: &str = "https://www.gnu.org/licenses/gpl-3.0.en.html";
 const REPO: &str = "https://git.serenity.jefftickle.com/jwt/hamshark";
 
 pub struct HamSharkGui {
-    colors: bool,
-
     session: Session,
     config: Configuration,
     settings: Settings,
 
     audio_input_selecting: Option<AudioInputDeviceBuilder>,
-    audio_input: AudioInputDeviceBuilder,
 }
 
 impl HamSharkGui {
     pub fn new(session: Session, config: Configuration, settings: Settings) -> Self {
         Self {
-            colors: true,
             session,
             config,
             settings,
             audio_input_selecting: None,
-            audio_input: AudioInputDeviceBuilder::default(),
         }
     }
 }
@@ -64,17 +62,12 @@ impl eframe::App for HamSharkGui {
         });
         CentralPanel::default().show(ctx, |ui| {
             log::trace!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
-            let color = if ui.visuals().dark_mode {
-                Color32::from_additive_luminance(196)
-            } else {
-                Color32::from_black_alpha(240)
-            };
-
-            ui.checkbox(&mut self.colors, "Colored")
-                .on_hover_text("Splash some color in 'er");
 
             if ui.button("Configure Live Audio Input").clicked() {
-                self.audio_input_selecting = Option::Some(self.audio_input.clone());
+                self.audio_input_selecting = match self.session.configuration() {
+                    Some(config) => Some(config.into()),
+                    None => Some(AudioInputDeviceBuilder::default()),
+                };
             }
             match self.audio_input_selecting.take() {
                 Some(mut data) => {
@@ -86,8 +79,8 @@ impl eframe::App for HamSharkGui {
                         should_cancel = true;
                     });
                     if should_save {
-                        
-                        //self.hamshark.update_audio_input(data.build().expect("Failed to build AudioInput"));
+                        let audiodevice = data.build().expect("should have built an audio device");
+                        self.session.configure(audiodevice).expect("should have configured an input device");
                     } else if !should_cancel {
                         self.audio_input_selecting = Option::Some(data);
                     }
@@ -108,56 +101,32 @@ impl eframe::App for HamSharkGui {
                     }
                 }
             }
-
-            Frame::canvas(ui.style()).show(ui, |ui| {
-                ui.ctx().request_repaint();
-                let time = ui.input(|i| i.time);
-
-                let desired_size = ui.available_width() * vec2(1.0, 0.35);
-                let (_id, rect) = ui.allocate_space(desired_size);
-
-                let to_screen =
-                    emath::RectTransform::from_to(Rect::from_x_y_ranges(0.0..=1.0, -1.0..=1.0), rect);
-
-                let mut shapes = vec![];
-
-                for &mode in &[1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0] {
-                    let mode = mode as f64;
-                    let n = 120;
-                    let speed = 1.5;
-
-                    let points: Vec<Pos2> = (0..=n)
-                        .map(|i| {
-                            let t = i as f64 / (n as f64);
-                            let amp = (time * speed * mode).sin() / mode;
-                            let y = amp * (t * std::f64::consts::TAU / 2.0 * mode).sin();
-                            to_screen * pos2(t as f32, y as f32)
-                        })
-                        .collect();
-
-                    let thickness = 10.0 / mode as f32;
-                    shapes.push(epaint::Shape::line(
-                        points,
-                        if self.colors {
-                            PathStroke::new_uv(thickness, move |rect, p| {
-                                let t = remap(p.x, rect.x_range(), -1.0..=1.0).abs();
-                                let center_color = hex_color!("#5BCEFA");
-                                let outer_color = hex_color!("#F5A9B8");
-
-                                Color32::from_rgb(
-                                    lerp(center_color.r() as f32..=outer_color.r() as f32, t) as u8,
-                                    lerp(center_color.g() as f32..=outer_color.g() as f32, t) as u8,
-                                    lerp(center_color.b() as f32..=outer_color.b() as f32, t) as u8,
-                                )
-                            })
-                        } else {
-                            PathStroke::new(thickness, color)
-                        },
-                    ));
+            
+            // Amplitude display
+            /*ScrollArea::horizontal().show(ui, |ui| {
+                trace!("Available size: {:?}", ui.available_size());
+                let amplitude_scale = 255u8;
+                let raw_amplitudes_arc = self.session.amplitudes();
+                let raw_amplitudes = raw_amplitudes_arc.read();
+                let amplitude_range = raw_amplitudes.len();
+                let mut amplitude_image = std::vec::from_elem(Color32::from_gray(0), amplitude_scale as usize * amplitude_range);
+                let f32scale: f32 = amplitude_scale.into();
+                for i in 0..amplitude_range {
+                    let display = (raw_amplitudes[i] * f32scale) as usize;
+                    amplitude_image[(display * amplitude_range) + i] = Color32::from_gray(255);
                 }
 
-                ui.painter().extend(shapes);
-            })
+                let amplitude_texture = ctx.load_texture(
+                    "amplitudes",
+                    ColorImage::new([amplitude_range, amplitude_scale.into()], amplitude_image),
+                    TextureOptions::NEAREST,
+                );
+
+                let amplitude_size = amplitude_texture.size_vec2();
+                let amplitude_sized_texture = egui::load::SizedTexture::new(&amplitude_texture, amplitude_size);
+
+                ui.add(Image::new(amplitude_sized_texture));
+            //});*/
         });
 
         // Request a repaint to keep the UI updated

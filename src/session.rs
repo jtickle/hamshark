@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, sync::{Arc}};
+use std::{fs::OpenOptions, path::{Path, PathBuf}, sync::Arc};
 use crate::{config::Settings, data::audioinput::AudioInputDevice};
 use chrono::{DateTime, Local};
 use cpal::{traits::{DeviceTrait, StreamTrait}, InputStreamTimestamp, Stream, StreamInstant};
@@ -6,6 +6,7 @@ use log::{debug, error, info};
 use parking_lot::RwLock;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{fs, io};
+use std::io::Write;
 use thiserror::Error;
 
 const SESSIONFILE: &str = "session.toml";
@@ -90,6 +91,10 @@ impl Session {
         self.audioconfig.is_some()
     }
 
+    pub fn configuration(&self) -> Option<AudioInputDevice> {
+        self.audioconfig.as_ref().map(|x| x.clone())
+    }
+
     pub fn is_started(&self) -> bool {
         self.stream.is_some()
     }
@@ -102,6 +107,15 @@ impl Session {
         if !self.is_configured() {
             return Err(Error::NoAudioConfiguration())
         }
+
+        let datapath = self.path.join("data.txt");
+        debug!("Writing amplitudes to file {:?}", datapath);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(self.path.join("data.txt"))
+            .unwrap();
 
         let cfg = self.audioconfig.as_ref().unwrap();
 
@@ -137,6 +151,9 @@ impl Session {
 
                     // Every time through the loop, add the next data to the recorded data
                     raw_amplitudes.write().push(data[data_index]);
+
+                    // Write a line to the file which is the worst way to do this
+                    writeln!(file, "{}", data[data_index]).unwrap();
 
                     buffer_index += 1;
                     data_index += 1;
@@ -187,5 +204,9 @@ impl Session {
         drop(stream);
 
         Ok(())
+    }
+
+    pub fn amplitudes(&self) -> Arc<RwLock<Vec<f32>>> {
+        self.raw_amplitudes.clone()
     }
 }

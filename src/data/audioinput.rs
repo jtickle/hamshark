@@ -7,6 +7,16 @@ pub struct AudioInputDevice {
     pub config: StreamConfig,
 }
 
+impl Clone for AudioInputDevice {
+    fn clone(&self) -> Self {
+        Self {
+            host: host_from_id(self.host.id()).expect("host id to exist"),
+            device: self.device.clone(),
+            config: self.config.clone(),
+        }
+    }
+}
+
 impl Debug for AudioInputDevice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AudioInputDevice")
@@ -47,21 +57,37 @@ impl Default for AudioInputDeviceBuilder {
 #[derive(Debug)]
 pub struct AudioInputBuilderIncomplete;
 
+impl From<AudioInputDevice> for AudioInputDeviceBuilder {
+    fn from(value: AudioInputDevice) -> Self {
+        AudioInputDeviceBuilder {
+            host_id: value.host.id(),
+            device: Some(value.device.clone()),
+            config: Some(value.config.clone()),
+        }
+    }
+}
+
 impl AudioInputDeviceBuilder {
-    pub fn with_default_device(mut self) -> Self {
+    pub fn get_default_device(&self) -> Option<Device> {
         let host = host_from_id(self.host_id).expect("the host ID to have been set sensibly");
-        self.device = host.default_input_device();
+        host.default_input_device()
+    }
+    pub fn with_default_device(mut self) -> Self {
+        self.device = self.get_default_device();
         self
     }
 
-    pub fn with_default_config(mut self) -> Self {
-        self.config = self.device.clone().map(|device| {
+    pub fn get_default_config(&self) -> Option<StreamConfig> {
+        self.device.clone().map(|device| {
             let mut config = device.default_input_config()
-                .expect("there should be a default input config if there is a device")
+                .expect("device has not default input config")
                 .config();
             config.buffer_size = BufferSize::Fixed(128);
             config
-        });
+        })
+    }
+    pub fn with_default_config(mut self) -> Self {
+        self.config = self.get_default_config();
         self
     }
 
