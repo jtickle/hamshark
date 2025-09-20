@@ -8,7 +8,7 @@ use eframe::{
 };
 use egui::{ColorImage, Image, ScrollArea, TextureOptions};
 use log::{debug, trace};
-use crate::{data::audioinput::AudioInputDeviceBuilder, session::Session};
+use crate::{data::audioinput::AudioInputDeviceBuilder, gui::amplitudes::Amplitudes, session::Session};
 use crate::config::{Configuration, Settings};
 
 use open;
@@ -22,6 +22,8 @@ pub struct HamSharkGui {
     settings: Settings,
 
     audio_input_selecting: Option<AudioInputDeviceBuilder>,
+
+    amplitudes: Option<Amplitudes>,
 }
 
 impl HamSharkGui {
@@ -31,6 +33,7 @@ impl HamSharkGui {
             config,
             settings,
             audio_input_selecting: None,
+            amplitudes: None,
         }
     }
 }
@@ -98,13 +101,24 @@ impl eframe::App for HamSharkGui {
                 false => {
                     if ui.button("Start").clicked() {
                         self.session.start().unwrap();
+                        self.amplitudes = Some(Amplitudes::new(
+                            self.session.amplitudes(),
+                            self.session.configuration().unwrap().config.sample_rate
+                        ));
                     }
                 }
             }
+
+            if let Some(amplitudes) = &mut self.amplitudes {
+                amplitudes.show(ui);
+            }
+
+
             
             // Amplitude display
-            /*ScrollArea::horizontal().show(ui, |ui| {
-                trace!("Available size: {:?}", ui.available_size());
+            /* 
+            //ScrollArea::horizontal().show(ui, |ui| {
+                debug!("Available size: {:?}", ui.available_size());
                 let amplitude_scale = 255u8;
                 let raw_amplitudes_arc = self.session.amplitudes();
                 let raw_amplitudes = raw_amplitudes_arc.read();

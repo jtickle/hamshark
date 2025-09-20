@@ -2,7 +2,7 @@ use std::{fs::OpenOptions, path::{Path, PathBuf}, sync::Arc};
 use crate::{config::Settings, data::audioinput::AudioInputDevice};
 use chrono::{DateTime, Local};
 use cpal::{traits::{DeviceTrait, StreamTrait}, InputStreamTimestamp, Stream, StreamInstant};
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use parking_lot::RwLock;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{fs, io};
@@ -109,7 +109,7 @@ impl Session {
         }
 
         let datapath = self.path.join("data.txt");
-        debug!("Writing amplitudes to file {:?}", datapath);
+        info!("Writing amplitudes to file {:?}", datapath);
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
@@ -141,8 +141,8 @@ impl Session {
                     (0.0f64, 0.0f64)
                 };
                 last_ts = Some(cur_ts);
-                debug!("Input Stream dt_cap={} dt_cb={} ts={:?} Length: {}", dt.0, dt.1, info.timestamp(), data.len());
-                debug!("Indexes: Buffer {} Data {}", buffer_index, data_index);
+                trace!("Input Stream dt_cap={} dt_cb={} ts={:?} Length: {}", dt.0, dt.1, info.timestamp(), data.len());
+                trace!("Indexes: Buffer {} Data {}", buffer_index, data_index);
 
                 loop {
 
@@ -164,7 +164,7 @@ impl Session {
                         fft.process(&mut buffer);
                         // Whenever an FFT is generated, add it to recorded FFTs
                         fft_results.write().push(buffer.clone());
-                        debug!("post fft {:?}", buffer);
+                        trace!("post fft {:?}", buffer);
                     }
 
                     // When we have consumed all the data, reset counter and wait for the next callback
