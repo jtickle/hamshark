@@ -1,12 +1,10 @@
 mod audioinput;
 mod amplitudes;
 
-use eframe::{
-    egui::{
-        containers::Frame, emath, epaint, lerp, pos2, remap, vec2, hex_color, CentralPanel, Color32, Context, Pos2, Rect
-    }, epaint::PathStroke
-};
-use egui::{ColorImage, Image, ScrollArea, TextureOptions};
+use chrono::Utc;
+use eframe::egui::{
+        CentralPanel, Context
+    };
 use log::{debug, trace};
 use crate::{data::audioinput::AudioInputDeviceBuilder, gui::amplitudes::Amplitudes, session::Session};
 use crate::config::{Configuration, Settings};
@@ -44,6 +42,7 @@ pub trait View {
 
 impl eframe::App for HamSharkGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        let begin = Utc::now();
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let path = self.session.path.to_str();
@@ -142,6 +141,8 @@ impl eframe::App for HamSharkGui {
                 ui.add(Image::new(amplitude_sized_texture));
             //});*/
         });
+
+        debug!("Frame drawn in {}", Utc::now() - begin);
 
         // Request a repaint to keep the UI updated
         //ctx.request_repaint();

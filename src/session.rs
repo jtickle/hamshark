@@ -4,6 +4,7 @@ use chrono::{DateTime, Local};
 use cpal::{traits::{DeviceTrait, StreamTrait}, InputStreamTimestamp, Stream, StreamInstant};
 use log::{debug, error, info, trace};
 use parking_lot::RwLock;
+use rand::prelude::*;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{fs, io};
 use std::io::Write;
@@ -151,6 +152,12 @@ impl Session {
 
                     // Every time through the loop, add the next data to the recorded data
                     raw_amplitudes.write().push(data[data_index]);
+
+                    // Write some BS so we can see progress without a mic for devtest only
+                    // TODO: temporary
+                    // let mut rng = rand::rng();
+                    // let rndval: f32 = rng.random_range(-0.5..0.5);
+                    // raw_amplitudes.write().push(rndval);
 
                     // Write a line to the file which is the worst way to do this
                     writeln!(file, "{}", data[data_index]).unwrap();

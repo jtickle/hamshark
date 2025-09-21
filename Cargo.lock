@@ -1584,6 +1584,7 @@ dependencies = [
  "log",
  "open",
  "parking_lot",
+ "rand",
  "rfd",
  "rustfft",
  "serde",
