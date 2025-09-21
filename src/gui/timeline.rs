@@ -4,7 +4,7 @@ use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, TextureOpt
 use log::debug;
 use parking_lot::RwLock;
 
-pub struct Amplitudes {
+pub struct Timeline {
     /// The desired screen height of the amplitude control
     height: usize,
     /// The desired horizontal scale (amplitudes:pixel, so a scale of 5 means 5:1)
@@ -19,7 +19,7 @@ pub struct Amplitudes {
     live: bool,
 }
 
-impl Amplitudes {    
+impl Timeline {    
     pub fn new(source: Arc<RwLock<Vec<f32>>>, sample_rate: SampleRate) -> Self {
         Self {
             source,

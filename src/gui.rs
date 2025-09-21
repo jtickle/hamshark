@@ -1,12 +1,12 @@
 mod audioinput;
-mod amplitudes;
+mod timeline;
 
 use chrono::Utc;
 use eframe::egui::{
         CentralPanel, Context
     };
 use log::{debug, trace};
-use crate::{data::audioinput::AudioInputDeviceBuilder, gui::amplitudes::Amplitudes, session::Session};
+use crate::{data::audioinput::AudioInputDeviceBuilder, gui::timeline::Timeline, session::Session};
 use crate::config::{Configuration, Settings};
 
 use open;
@@ -21,7 +21,7 @@ pub struct HamSharkGui {
 
     audio_input_selecting: Option<AudioInputDeviceBuilder>,
 
-    amplitudes: Option<Amplitudes>,
+    amplitudes: Option<Timeline>,
 }
 
 impl HamSharkGui {
@@ -100,7 +100,7 @@ impl eframe::App for HamSharkGui {
                 false => {
                     if ui.button("Start").clicked() {
                         self.session.start().unwrap();
-                        self.amplitudes = Some(Amplitudes::new(
+                        self.amplitudes = Some(Timeline::new(
                             self.session.amplitudes(),
                             self.session.configuration().unwrap().config.sample_rate
                         ));
