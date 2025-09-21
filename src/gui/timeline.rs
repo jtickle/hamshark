@@ -1,17 +1,17 @@
 use std::{ops::Range, sync::Arc};
 use cpal::SampleRate;
-use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, TextureOptions};
+use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Pos2, TextureOptions, Vec2};
 use log::debug;
 use parking_lot::RwLock;
 
 pub struct Timeline {
-    /// The desired screen height of the amplitude control
+    /// The desired screen height of the timeline control
     height: usize,
-    /// The desired horizontal scale (amplitudes:pixel, so a scale of 5 means 5:1)
+    /// The desired horizontal scale (samples:pixel, so a scale of 5 means 5:1)
     scale: f32,
-    /// Arc RwLock pointer to the amplitudes from live or prerecorded data
-    source: Arc<RwLock<Vec<f32>>>,
-    /// The "start" offset (amplitude space, not screen space)
+    /// Arc RwLock pointer to the samples from live or prerecorded data
+    samples: Arc<RwLock<Vec<f32>>>,
+    /// The "start" offset in sample space
     offset: usize,
     /// The sample rate
     sample_rate: SampleRate,
@@ -22,7 +22,7 @@ pub struct Timeline {
 impl Timeline {    
     pub fn new(source: Arc<RwLock<Vec<f32>>>, sample_rate: SampleRate) -> Self {
         Self {
-            source,
+            samples: source,
             offset: 0,
             height: 256,
             scale: 1024.0,
@@ -31,87 +31,27 @@ impl Timeline {
         }
     }
 
-    /// Screen Space to Amplitude Space (scale only, do not apply offset)
-    fn ss_to_as_scale(&self, n: usize) -> usize {
+    /// Screen Space to Sample Space (scale only, do not apply offset)
+    fn screen_to_sample_scale(&self, n: usize) -> usize {
         (n as f32 * self.scale) as usize
     }
 
-    /// Screen Space to Amplitude Space
-    fn ss_to_as(&self, n: usize) -> usize {
-        self.ss_to_as_scale(n) + self.offset
+    /// Screen Space to Sample Space
+    fn screen_to_sample(&self, n: usize) -> usize {
+        self.screen_to_sample_scale(n) + self.offset
     }
 
-    /// Get the range of amplitudes contained by a single pixel (this is always >=1 and usually >1)
-    fn ss_to_as_range(&self, n: usize, clamp: usize) -> Range<usize> {
-        self.ss_to_as(n)..self.ss_to_as(n+1).clamp(0, clamp)
+    /// Get the range of samples contained by a single pixel (this is always >=1 and usually >1)
+    fn screen_to_sample_range(&self, n: usize, clamp: usize) -> Range<usize> {
+        self.screen_to_sample(n)..self.screen_to_sample(n+1).clamp(0, clamp)
+    }
+
+    fn screen_to_image_idx(&self, width: f32, x: f32, y: f32) -> usize {
+        (y * width + x) as usize
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
-        // Get the current screen real estate that we have to work with
-        let width = ui.available_size().x;
-        let height = self.height as f32;
-
-        // I am assuming that egui will scale this properly but it may need to be revisited after
-        // experimentation. Look into ui.pixels_per_point() if necessary.
-
-        // The amplitude image is drawn horizontally.
-        // The most recent amplitude is on the right.
-        // Zero is in the center. Lines drawn at +-128
-        let mut amplitude_image = std::vec::from_elem(
-            Color32::from_gray(0),
-            (width * height) as usize
-        );
-
-        // Acquire read lock on amplitudes
-        let amplitudes = self.source.read();
-
-        // If live, move with the live data
-        if self.live {
-            self.offset = amplitudes.len() - self.ss_to_as_scale(width as usize).clamp(0, amplitudes.len());
-            debug!("Offset: {}", self.offset);
-        }
-
-        // We will loop over the width of the timeline control
-        // The relative positions within the raw amplitudes can be derived from those indexes
-
-        for i in 0..(width as usize) {
-            if amplitudes.len() == 0 {
-                break;
-            }
-
-            let amp_range = self.ss_to_as_range(i, amplitudes.len());
-
-            // amp_range will be empty if the beginning is beyond the end of the amplitude Vec
-            if amp_range.is_empty() {
-                break;
-            }
-
-            let bucket = &amplitudes[amp_range];
-
-            // Take the maximum value over the amplitudes in this bucket
-            let (f32max, f32min) = bucket.iter().fold((0f32, 0f32),
-                |acc, x| (acc.0.max(*x), acc.1.min(*x))
-            );
-
-            let halfheight= height/2f32;
-
-            let displaymax = (f32max * halfheight + halfheight) as usize;
-            let displaymin = (f32min * halfheight + halfheight) as usize;
-            amplitude_image[displaymax * width as usize + i] = Color32::from_rgb(0, 255, 0);
-            amplitude_image[displaymin * width as usize + i] = Color32::from_rgb(255, 0, 0);
-        }
-
-        drop(amplitudes);
-
-        let amplitude_texture = ui.ctx().load_texture(
-            "amplitudes",
-            ColorImage::new([width as usize, height as usize], amplitude_image),
-            TextureOptions::NEAREST,
-        );
-
-        let size = amplitude_texture.size_vec2();
-        let sized_texture = SizedTexture::new(&amplitude_texture, size);
-
+        // Show the timeline controls
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.live, "Live")
                 .on_hover_text("If checked, the timeline will auto-scroll to keep up with live data.");
@@ -120,6 +60,85 @@ impl Timeline {
                 .prefix("Scale: ")
             ).on_hover_text("Scales the timeline view to N samples per 1 pixel.");
         });
+
+        // Get the current screen real estate that we have to work with
+        let width = ui.available_size().x;
+        let height = self.height as f32;
+
+        // I am assuming that egui will scale this properly but it may need to be revisited after
+        // experimentation. Look into ui.pixels_per_point() if necessary.
+
+        // The amplitude image is drawn horizontally.
+        // The most recent sample is on the right.
+        // Zero is in the center. Lines drawn at +-128
+        let mut amplitude_image = std::vec::from_elem(
+            Color32::from_gray(0),
+            (width * height) as usize
+        );
+
+        // Acquire read lock on amplitudes
+        let samples = self.samples.read();
+
+        // If live, move with the live data
+        if self.live {
+            self.offset = samples.len() - self.screen_to_sample_scale(width as usize).clamp(0, samples.len());
+            debug!("Offset: {}", self.offset);
+        }
+
+        // Loop over the width of the timeline control
+        // The relative positions within the sample vector can be derived from those indexes
+        for i in 0..(width as usize) {
+            if samples.len() == 0 {
+                break;
+            }
+
+            // Derive sample range for the current pixel
+            let sample_range = self.screen_to_sample_range(i, samples.len());
+
+            // amp_range will be empty if the beginning is beyond the end of the amplitude Vec
+            if sample_range.is_empty() {
+                break;
+            }
+
+            let bucket = &samples[sample_range];
+
+            // Take the maximum and minimum values over the samples in this bucket
+            let (f32max, f32min) = bucket.iter().fold((0f32, 0f32),
+                |acc, x| (acc.0.max(*x), acc.1.min(*x))
+            );
+
+            let halfheight = height/2f32;
+
+            let displaymax = f32max * halfheight + halfheight;
+            let displaymin = f32min * halfheight + halfheight;
+            amplitude_image[self.screen_to_image_idx(width, i as f32, displaymax)] = Color32::from_rgb(0, 255, 0);
+            amplitude_image[self.screen_to_image_idx(width, i as f32, displaymin)] = Color32::from_rgb(255, 0, 0);
+        }
+
+        // Draw a vertical line for the current pointer position, if any
+        if let Some(pointer_pos) = ui.input(|i| i.pointer.latest_pos()) {
+            let mut bounds = ui.cursor();
+            bounds.max.y = bounds.min.y + height;
+            bounds.max.x = bounds.max.x - 1f32;
+            if bounds.contains(pointer_pos) {
+                for i in 0..(height as usize) {
+                    let idx = self.screen_to_image_idx(width, pointer_pos.x - bounds.min.x, i as f32);
+                    amplitude_image[idx] = Color32::from_rgb(0, 0, 255);
+                }
+            }
+        }
+
+        drop(samples);
+
+        let amplitude_texture = ui.ctx().load_texture(
+            "samples",
+            ColorImage::new([width as usize, height as usize], amplitude_image),
+            TextureOptions::NEAREST,
+        );
+
+        // Show the timeline
+        let size = amplitude_texture.size_vec2();
+        let sized_texture = SizedTexture::new(&amplitude_texture, size);
         ui.add(Image::new(sized_texture));
     }
 }
