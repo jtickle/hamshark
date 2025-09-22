@@ -5,7 +5,7 @@ use chrono::Utc;
 use eframe::egui::{
         CentralPanel, Context
     };
-use log::{debug, trace};
+use log::{debug};
 use crate::{data::audioinput::AudioInputDeviceBuilder, gui::timeline::Timeline, session::Session};
 use crate::config::{Configuration, Settings};
 
@@ -42,7 +42,10 @@ pub trait View {
 
 impl eframe::App for HamSharkGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+
         let begin = Utc::now();
+
+        // Add some status to the bottom of the window
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let path = self.session.path.to_str();
@@ -62,6 +65,8 @@ impl eframe::App for HamSharkGui {
                 }
             })
         });
+
+        // Main content panel
         CentralPanel::default().show(ctx, |ui| {
             log::trace!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
 
@@ -111,40 +116,13 @@ impl eframe::App for HamSharkGui {
             if let Some(amplitudes) = &mut self.amplitudes {
                 amplitudes.show(ui);
             }
-
-
-            
-            // Amplitude display
-            /* 
-            //ScrollArea::horizontal().show(ui, |ui| {
-                debug!("Available size: {:?}", ui.available_size());
-                let amplitude_scale = 255u8;
-                let raw_amplitudes_arc = self.session.amplitudes();
-                let raw_amplitudes = raw_amplitudes_arc.read();
-                let amplitude_range = raw_amplitudes.len();
-                let mut amplitude_image = std::vec::from_elem(Color32::from_gray(0), amplitude_scale as usize * amplitude_range);
-                let f32scale: f32 = amplitude_scale.into();
-                for i in 0..amplitude_range {
-                    let display = (raw_amplitudes[i] * f32scale) as usize;
-                    amplitude_image[(display * amplitude_range) + i] = Color32::from_gray(255);
-                }
-
-                let amplitude_texture = ctx.load_texture(
-                    "amplitudes",
-                    ColorImage::new([amplitude_range, amplitude_scale.into()], amplitude_image),
-                    TextureOptions::NEAREST,
-                );
-
-                let amplitude_size = amplitude_texture.size_vec2();
-                let amplitude_sized_texture = egui::load::SizedTexture::new(&amplitude_texture, amplitude_size);
-
-                ui.add(Image::new(amplitude_sized_texture));
-            //});*/
         });
 
-        debug!("Frame drawn in {}", Utc::now() - begin);
+        //debug!("Frame drawn in {}", Utc::now() - begin);
 
-        // Request a repaint to keep the UI updated
-        //ctx.request_repaint();
+        // Request repaint if we're "running"
+        if self.session.is_started() {
+            ctx.request_repaint();
+        }
     }
 }

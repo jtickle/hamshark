@@ -3,7 +3,6 @@ use egui::{ComboBox, Id, Modal, Ui};
 use crate::data::audioinput::{
     AudioInputDeviceBuilder,
 };
-use log::info;
 use crate::gui::View;
 
 impl View for AudioInputDeviceBuilder {

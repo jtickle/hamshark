@@ -82,7 +82,6 @@ impl Timeline {
         // If live, move with the live data
         if self.live {
             self.offset = samples.len() - self.screen_to_sample_scale(width as usize).clamp(0, samples.len());
-            debug!("Offset: {}", self.offset);
         }
 
         // Loop over the width of the timeline control

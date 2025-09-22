@@ -8,6 +8,7 @@ mod gui;
 mod config;
 mod session;
 mod data;
+
 fn main() -> eframe::Result<()>{
     env_logger::init();
     let native_options = eframe::NativeOptions::default();
@@ -23,6 +24,8 @@ fn main() -> eframe::Result<()>{
     eframe::run_native(
         "Hamshark",
         native_options,
-        Box::new(|_cc| Ok(Box::new(HamSharkGui::new(session, config, settings)))))
+        Box::new(|_cc| {
+            Ok(Box::new(HamSharkGui::new(session, config, settings)))
+        }))
 }
 
