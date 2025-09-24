@@ -84,23 +84,31 @@ impl Timeline {
         let x = ((1.0 + (phase.cos() * magnitude)) * self.samples_per_fft as f32).floor() as usize;
         let y = ((1.0 - (phase.sin() * magnitude)) * self.samples_per_fft as f32).floor() as usize;
         //debug!("{} {} {} {}", phase.cos(), 1.0 + phase.cos(), (1.0 + phase.cos()) * magnitude, (1.0 + phase.cos()) * magnitude * self.samples_per_fft as f32);
-        (y * self.samples_per_fft * 2) + x
+        (y.clamp(0, self.samples_per_fft * 2 - 1) * self.samples_per_fft * 2) + x.clamp(0, self.samples_per_fft * 2 - 1)
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
+        // Get the current screen real estate that we have to work with
+        let width = ui.available_size().x.floor() as usize;
+        let height = self.height;
+
         // Show the timeline controls
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.live, "Live")
                 .on_hover_text("If checked, the timeline will auto-scroll to keep up with live data.");
+
+            let sampleoffset = self.screen_to_sample_scale(self.offset + width/2);
+            let prevscale = self.scale;
+
             ui.add(DragValue::new(&mut self.scale)
                 .range(1.0f32..=44100.0f32)
                 .prefix("Scale: ")
             ).on_hover_text("Scales the timeline view to N samples per 1 pixel.");
-        });
 
-        // Get the current screen real estate that we have to work with
-        let width = ui.available_size().x.floor() as usize;
-        let height = self.height;
+            if !self.live && prevscale != self.scale {
+                self.offset = self.sample_to_screen(sampleoffset) - width/2;
+            }
+        });
 
         // I am assuming that egui will scale this properly but it may need to be revisited after
         // experimentation. Look into ui.pixels_per_point() if necessary.
