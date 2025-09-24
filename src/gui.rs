@@ -106,7 +106,8 @@ impl eframe::App for HamSharkGui {
                     if ui.button("Start").clicked() {
                         self.session.start().unwrap();
                         self.amplitudes = Some(Timeline::new(
-                            self.session.amplitudes(),
+                            self.session.samples(),
+                            self.session.fft(),
                             self.session.configuration().unwrap().config.sample_rate
                         ));
                     }

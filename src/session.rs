@@ -213,7 +213,11 @@ impl Session {
         Ok(())
     }
 
-    pub fn amplitudes(&self) -> Arc<RwLock<Vec<f32>>> {
+    pub fn samples(&self) -> Arc<RwLock<Vec<f32>>> {
         self.raw_amplitudes.clone()
+    }
+
+    pub fn fft(&self) -> Arc<RwLock<Vec<Vec<Complex<f32>>>>> {
+        self.fft_results.clone()
     }
 }
