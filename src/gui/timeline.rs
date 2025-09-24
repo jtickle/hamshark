@@ -1,6 +1,6 @@
 use std::{ops::Range, sync::Arc};
 use cpal::SampleRate;
-use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, TextureOptions};
+use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Sense, TextureOptions};
 use log::debug;
 use parking_lot::RwLock;
 
@@ -138,6 +138,18 @@ impl Timeline {
         // Show the timeline
         let size = amplitude_texture.size_vec2();
         let sized_texture = SizedTexture::new(&amplitude_texture, size);
-        ui.add(Image::new(sized_texture));
+        let image = Image::new(sized_texture)
+            .sense(Sense::click_and_drag());
+        let response = ui.add(image);
+        if response.clicked() {
+            debug!("Clicked!!");
+        }
+        if response.dragged() {
+            self.live = false;
+            debug!("offset {} delta {} scaled {}", self.offset, response.drag_delta().x, self.screen_to_sample_scale(response.drag_delta().x as usize));
+            self.offset = self.offset.checked_sub(
+                self.screen_to_sample_scale(response.drag_delta().x as usize)
+            ).unwrap_or_default();
+        }
     }
 }
