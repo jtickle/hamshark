@@ -1,6 +1,6 @@
 use std::{ops::Range, sync::Arc};
 use cpal::SampleRate;
-use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Pos2, Response, Sense, TextureOptions, Vec2};
+use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Sense, TextureOptions, Vec2};
 use log::debug;
 use parking_lot::RwLock;
 use rustfft::num_complex::Complex;
@@ -183,7 +183,7 @@ impl Timeline {
 
             // Now build the FFT image
             // There are always more samples than FFT data so if we get this far we are good
-            let fft_range = self.screen_to_fft_range(i + (self.offset % self.samples_per_fft), fft.len());
+            let fft_range = self.screen_to_fft_range(i + self.sample_to_screen(self.offset % self.samples_per_fft), fft.len());
             if fft_range.is_empty() {
                 // TODO: if there is more fft data and the scale is too fine, just include the
                 // next datapoint so we smear the FFT display over multiple pixels
@@ -199,7 +199,9 @@ impl Timeline {
                     let polar = k[fft_shift].to_polar();
                     // We plot every magnitude and phase on the IQ diagram. This might hurt a bit
                     // but I really don't want to implement selection ranges this morning.
-                    iq_image[self.polar_to_iq_idx(polar.0, polar.1)] = Color32::from_gray(255);
+                    let iq_idx = self.polar_to_iq_idx(polar.0, polar.1);
+                    let prev_color = iq_image[iq_idx];
+                    iq_image[iq_idx] = Color32::from_gray(prev_color.r().max(255 - (self.sample_to_screen(samples.len()).min(width) - i).clamp(0, 255) as u8));
                     (acc.0.max(polar.0), acc.1.max(polar.1))
                 });
                 // let's ignore phase for now that ought to only matter at IQ time

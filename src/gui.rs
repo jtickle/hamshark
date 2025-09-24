@@ -5,7 +5,6 @@ use chrono::Utc;
 use eframe::egui::{
         CentralPanel, Context
     };
-use log::{debug};
 use crate::{data::audioinput::AudioInputDeviceBuilder, gui::timeline::Timeline, session::Session};
 use crate::config::{Configuration, Settings};
 
