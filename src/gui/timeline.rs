@@ -65,7 +65,7 @@ impl Timeline {
 
     /// Screen Space to FFT Space
     fn screen_to_fft(&self, n: usize) -> usize {
-        self.screen_to_fft_scale(n) + (self.offset as f32 * self.scale / self.samples_per_fft as f32).floor() as usize
+        self.screen_to_fft_scale(n) + self.screen_to_fft_scale(self.offset)
     }
 
     /// Get the range of fft data contained by a single pixel (this is always >=1 and usually >1)
@@ -183,7 +183,7 @@ impl Timeline {
 
             // Now build the FFT image
             // There are always more samples than FFT data so if we get this far we are good
-            let fft_range = self.screen_to_fft_range(i, fft.len());
+            let fft_range = self.screen_to_fft_range(i + (self.offset % self.samples_per_fft), fft.len());
             if fft_range.is_empty() {
                 // TODO: if there is more fft data and the scale is too fine, just include the
                 // next datapoint so we smear the FFT display over multiple pixels
