@@ -5,6 +5,9 @@ use chrono::Utc;
 use eframe::egui::{
         CentralPanel, Context
     };
+use egui::scroll_area::ScrollBarVisibility;
+use egui::Button;
+use log::info;
 use crate::{data::audioinput::AudioInputDeviceBuilder, gui::timeline::Timeline, session::Session};
 use crate::config::{Configuration, Settings};
 
@@ -19,8 +22,6 @@ pub struct HamSharkGui {
     settings: Settings,
 
     audio_input_selecting: Option<AudioInputDeviceBuilder>,
-
-    amplitudes: Option<Timeline>,
 }
 
 impl HamSharkGui {
@@ -30,7 +31,6 @@ impl HamSharkGui {
             config,
             settings,
             audio_input_selecting: None,
-            amplitudes: None,
         }
     }
 }
@@ -43,6 +43,33 @@ impl eframe::App for HamSharkGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
 
         let begin = Utc::now();
+
+        // Top Menu Bar
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Configure Audio").clicked() {
+                        self.audio_input_selecting = match self.session.configuration() {
+                            Some(config) => Some(config.into()),
+                            None => Some(AudioInputDeviceBuilder::default()),
+                        };
+                    }
+                    if ui.button("Quit").clicked() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                })
+            });
+        });
+
+        // Tool Bar
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+            let button = Button::new("➕");
+            let enabled = self.session.get_recording_clip().is_none();
+            if ui.add_enabled(enabled, button).clicked() {
+                info!("clicked");
+                self.session.record_new_clip().unwrap();
+            }
+        });
 
         // Add some status to the bottom of the window
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
@@ -65,16 +92,61 @@ impl eframe::App for HamSharkGui {
             })
         });
 
+        // Session Overview
+        egui::SidePanel::left("clips").show(ctx, |ui| {
+            let mut first = true;
+            for clip_arc in self.session.clips() {
+                if ! first {
+                    ui.separator();
+                }
+                first = false;
+
+                let file_name = {
+                    let clip = clip_arc.read();
+                    clip
+                        .path
+                        .file_name()
+                        .expect("file name to exist").to_str().expect("file name to be representable as str").to_owned()
+                };
+                if ui.button(file_name).clicked() {
+                    clip_arc.write().open().unwrap();
+                };
+            }
+        });
+
         // Main content panel
         CentralPanel::default().show(ctx, |ui| {
             log::trace!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
 
-            if ui.button("Configure Live Audio Input").clicked() {
-                self.audio_input_selecting = match self.session.configuration() {
-                    Some(config) => Some(config.into()),
-                    None => Some(AudioInputDeviceBuilder::default()),
-                };
-            }
+            // For each open clip, show analysis
+            for clip_arc in self.session.clips() {
+                let clip = clip_arc.read();
+                if ! clip.is_open() {
+                    continue;
+                }
+                let filename = clip.path.file_name().unwrap().to_str().unwrap();
+                let mut open = true;
+                egui::Window::new(filename)
+                    .constrain_to(ui.clip_rect())
+                    .scroll(true)
+                    .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
+                    .open(&mut open)
+                    .show(ctx, |ui| {
+                        Timeline::new(
+                            clip.samples().unwrap(),
+                            Default::default(),
+                            self.session.configuration().unwrap().config.sample_rate,
+                        ).show(ui);
+                    });
+                // Done with clip... also otherwise the upcoming write attempt will freeze
+                drop(clip);
+
+                // Detect user closed window, in which case we remove the clip from open clips
+                if ! open {
+                    clip_arc.write().close();
+                }
+            };
+
             match self.audio_input_selecting.take() {
                 Some(mut data) => {
                     let mut should_save = false;
@@ -92,29 +164,6 @@ impl eframe::App for HamSharkGui {
                     }
                 },
                 None => (),
-            }
-
-            match self.session.is_started() {
-                true => {
-                    if ui.button("Stop").clicked() {
-                        self.session.stop().unwrap();
-                    }
-
-                },
-                false => {
-                    if ui.button("Start").clicked() {
-                        self.session.start().unwrap();
-                        self.amplitudes = Some(Timeline::new(
-                            self.session.samples(),
-                            self.session.fft(),
-                            self.session.configuration().unwrap().config.sample_rate
-                        ));
-                    }
-                }
-            }
-
-            if let Some(amplitudes) = &mut self.amplitudes {
-                amplitudes.show(ui);
             }
         });
 

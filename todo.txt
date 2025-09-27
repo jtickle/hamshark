@@ -1,0 +1,3 @@
+session - clip browser
+new recording = new clip
+clip editor - playback, slice into clips (requires robust undo)

@@ -1,13 +1,13 @@
-use std::{fs::OpenOptions, path::{Path, PathBuf}, sync::Arc};
-use crate::{config::Settings, data::audioinput::AudioInputDevice};
+use std::{path::{Path, PathBuf}, sync::Arc};
+use crate::{config::Settings, data::{audio::Clip, audioinput::AudioInputDevice}};
 use chrono::{DateTime, Local};
-use cpal::{traits::{DeviceTrait, StreamTrait}, InputStreamTimestamp, Stream, StreamInstant};
+use cpal::{traits::{DeviceTrait, StreamTrait}, InputStreamTimestamp, Stream};
+use hound::{SampleFormat, WavSpec};
 use log::{debug, error, info, trace};
 use parking_lot::RwLock;
 use rand::prelude::*;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{fs, io};
-use std::io::Write;
 use thiserror::Error;
 
 const SESSIONFILE: &str = "session.toml";
@@ -15,31 +15,36 @@ const FFTSIZE: usize = 128;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Tried to start but was already running")]
-    AlreadyRunning(),
+    #[error("Tried to record new clip but was already recording")]
+    AlreadyRecording(),
     #[error("Tried to stop but was not running")]
     NotRunning(),
     #[error("No audio configuration provided")]
     NoAudioConfiguration(),
-    #[error("Error building input stream: {0}")]
-    BuildStreamError(#[source] cpal::BuildStreamError),
-    #[error("Error playing input stream: {0}")]
-    PlayStreamError(#[source] cpal::PlayStreamError),
+    #[error("Error scanning session directory: {0}")]
+    DirectoryRead(#[source] io::Error),
+    #[error("Error creating clip: {0}")]
+    CreateClip(#[from] hound::Error),
 }
 
 pub struct Session {
     pub path: PathBuf,
+    clips: Vec<Arc<RwLock<Clip>>>,
+
     fft: Arc<dyn Fft<f32>>,
     audioconfig: Option<AudioInputDevice>,
     stream: Option<Stream>,
 
     raw_amplitudes: Arc<RwLock<Vec<f32>>>,
     fft_results: Arc<RwLock<Vec<Vec<Complex<f32>>>>>,
-    timestamps: Arc<RwLock<Vec<StreamInstant>>>,
 }
 
-fn create_base_path_by_datetime(base: &Path, now: DateTime<Local>) -> Result<PathBuf, io::Error> {
-    let formatted = now.format("%Y-%m-%d_%H-%M-%S").to_string();
+fn create_filename_from_now() -> String {
+    Local::now().format("%Y-%m-%d_%H-%M-%S").to_string()
+}
+
+fn create_base_path_by_datetime(base: &Path) -> Result<PathBuf, io::Error> {
+    let formatted = create_filename_from_now();
     let session_path = base.join(formatted);
     info!("Creating session directory {:?}", session_path.as_os_str());
     fs::create_dir_all(session_path.as_path())?;
@@ -47,23 +52,27 @@ fn create_base_path_by_datetime(base: &Path, now: DateTime<Local>) -> Result<Pat
 }
 
 impl Session {
-    pub fn from_settings(settings: &Settings) -> Result<Session, io::Error> {
+    pub fn from_settings(settings: &Settings) -> Result<Session, hound::Error> {
         let base_dir = settings.session_base_dir.as_path();
         let now = Local::now();
-        let path = create_base_path_by_datetime(base_dir, now)?;
+        let path = create_base_path_by_datetime(base_dir)?;
 
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(FFTSIZE);
 
-        Ok(Session {
+        let mut session = Session {
             path,
+            clips: Default::default(),
             fft,
             audioconfig: None,
             stream: None,
             raw_amplitudes: Arc::new(RwLock::new(Vec::new())),
             fft_results: Arc::new(RwLock::new(Vec::new())),
-            timestamps: Arc::new(RwLock::new(Vec::new())),
-        })
+        };
+
+        session.rescan_clips()?;
+
+        Ok(session)
     }
 
     pub fn configure(&mut self, newconfig: AudioInputDevice) -> Result<(), Error> {
@@ -100,36 +109,107 @@ impl Session {
         self.stream.is_some()
     }
 
+    pub fn clips(&self) -> &Vec<Arc<RwLock<Clip>>> {
+        &self.clips
+    }
+
+    pub fn open_clip(&self, clip: &Clip) -> Result<(), hound::Error> {
+        for clip_arc in &self.clips {
+            let path = {
+                let arc_read = clip_arc.read();
+                arc_read.path.clone()
+            };
+            if path == clip.path {
+                let mut dest = clip_arc.write();
+                dest.open();
+            }
+        }
+        Ok(())
+    }
+
+    pub fn update_clip(&mut self, path: &Path) {
+        for clip in self.clips() {
+            if clip.read().path == path {
+                return;
+            }
+        }
+        self.clips.push(Arc::new(RwLock::new(Clip::from(path))));
+    }
+
+    pub fn rescan_clips(&mut self) -> Result<(), hound::Error> {
+        for result in fs::read_dir(self.path.as_path())? {
+            let entry = result?;
+            if entry.file_type()?.is_file() {
+                let pathbuf = PathBuf::from(entry.file_name());
+                if let Some(ext) = pathbuf.extension() {
+                    if ext == "wav" {
+                        self.update_clip(pathbuf.as_path())
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_recording_clip(&self) -> Option<Arc<RwLock<Clip>>> {
+        for clip in &self.clips {
+            if clip.read().is_writable() {
+                return Some(clip.clone());
+            }
+        }
+        None
+    }
+
+    pub fn record_new_clip(&mut self) -> Result<(), Error> {
+        if self.get_recording_clip().is_some() {
+            return Err(Error::AlreadyRecording());
+        }
+        if !self.is_configured() {
+            return Err(Error::NoAudioConfiguration());
+        }
+        let cfg = self.audioconfig.as_ref().unwrap();
+
+        let mut clipname = self.path.clone();
+        clipname.push(create_filename_from_now());
+        clipname.set_extension("wav");
+        
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: cfg.config.sample_rate.0,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int
+        };
+        let clip = Arc::new(RwLock::new(Clip::new(clipname.as_path(), spec)?));
+        self.clips.push(clip.clone());
+
+        Ok(())
+    }
+
     pub fn start(&mut self) -> Result<(), Error> {
         if self.is_started() {
-            return Err(Error::AlreadyRunning())
+            return Err(Error::AlreadyRecording())
         }
+
+        // Build filename for new clip
+        let clip = self.record_new_clip()?;
 
         if !self.is_configured() {
             return Err(Error::NoAudioConfiguration())
         }
-
-        let datapath = self.path.join("data.txt");
-        info!("Writing amplitudes to file {:?}", datapath);
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .append(true)
-            .open(self.path.join("data.txt"))
-            .unwrap();
-
         let cfg = self.audioconfig.as_ref().unwrap();
 
-        let mut last_ts: Option<InputStreamTimestamp> = None;
+        /*let mut last_ts: Option<InputStreamTimestamp> = None;
         let mut buffer = vec![Complex{ re: 0.0, im: 0.0}; FFTSIZE];
         let mut buffer_index = 0usize;
         let mut data_index = 0usize;
         let fft = Arc::clone(&self.fft);
-        let raw_amplitudes = Arc::clone(&self.raw_amplitudes);
-        let fft_results = Arc::clone(&self.fft_results);
+        let samples = clip.read().samples();
+        let frequencies = clip.read().frequencies();
         self.stream = match cfg.device.build_input_stream(
             &cfg.config,
             move |data: &[f32], info| {
+                let mut writable_clip = clip.write();
+                let writer = writable_clip.writer().unwrap();
 
                 // Profiling Data
                 let cur_ts = info.timestamp();
@@ -151,7 +231,7 @@ impl Session {
                     buffer[buffer_index] = Complex::from(data[data_index]);
 
                     // Every time through the loop, add the next data to the recorded data
-                    raw_amplitudes.write().push(data[data_index]);
+                    samples.write().push(data[data_index]);
 
                     // Write some BS so we can see progress without a mic for devtest only
                     // TODO: temporary
@@ -159,8 +239,9 @@ impl Session {
                     // let rndval: f32 = rng.random_range(-0.5..0.5);
                     // raw_amplitudes.write().push(rndval);
 
-                    // Write a line to the file which is the worst way to do this
-                    writeln!(file, "{}", data[data_index]).unwrap();
+                    // Write a sample
+                    writer.write_sample((data[data_index] * i16::MAX as f32) as i16)
+                        .expect("to write a sample");
 
                     buffer_index += 1;
                     data_index += 1;
@@ -170,7 +251,7 @@ impl Session {
                         buffer_index = 0;
                         fft.process(&mut buffer);
                         // Whenever an FFT is generated, add it to recorded FFTs
-                        fft_results.write().push(buffer.clone());
+                        frequencies.write().push(buffer.clone());
                         trace!("post fft {:?}", buffer);
                     }
 
@@ -190,13 +271,13 @@ impl Session {
                 // Start the stream and store it if successful
                 match stream.play() {
                     Ok(_) => Some(stream),
-                    Err(error) => return Err(Error::PlayStreamError(error)),
+                    Err(error) => return Err(Error::PlayStream(error)),
                 }
             }
             Err(error) => {
-                return Err(Error::BuildStreamError(error))
+                return Err(Error::BuildStream(error))
             },
-        };
+        };*/
 
         Ok(())
     }

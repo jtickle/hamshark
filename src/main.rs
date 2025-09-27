@@ -8,6 +8,7 @@ mod gui;
 mod config;
 mod session;
 mod data;
+mod pipeline;
 
 fn main() -> eframe::Result<()>{
     env_logger::init();
