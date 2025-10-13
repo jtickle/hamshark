@@ -1,16 +1,17 @@
-use std::sync::mpsc::Sender;
+use std::sync::{Arc};
 
 use cpal::{traits::{DeviceTrait, StreamTrait}, Stream};
 use log::error;
-use thiserror::Error as ThisError;
+use parking_lot::RwLock;
 
-use crate::{data::{audio::Samples, audioinput::AudioInputDevice}, pipeline::{self, Source, State}};
+use crate::{data::audioinput::AudioInputDevice, pipeline::{Element, Error, Pipeline, Sink, Source, State}};
+
+static NAME: &str = "CpalSource";
 
 pub struct CpalSource {
     audioinputdevice: AudioInputDevice,
     stream: Option<Stream>,
-    samples: Samples,
-    on_data: Option<Sender<()>>,
+    next: Option<Arc<RwLock<dyn Sink>>>,
 }
 
 impl From<AudioInputDevice> for CpalSource {
@@ -18,50 +19,33 @@ impl From<AudioInputDevice> for CpalSource {
         Self {
             audioinputdevice: value,
             stream: None,
-            samples: Default::default(),
-            on_data: None,
+            next: None,
         }
     }
 }
 
-#[derive(Debug, ThisError)]
-pub enum Error {
-    #[error("Pipeline Error: {0}")]
-    PipelineError(#[from] pipeline::Error),
-}
-
-impl Source for CpalSource {
-    type Error = Error;
-
-    fn play(&mut self) -> Result<(), Self::Error> {
+impl Pipeline for CpalSource {
+    fn play(&mut self) -> Result<(), Error> {
         if self.stream.is_some() {
             return Ok(())
         }
 
         let cfg = &self.audioinputdevice;
 
+        // Make sure pipeline is complete
+        if ! (self as &dyn Source).is_complete() {
+            return Err(Error::Incomplete(NAME.to_string()))
+        }
+
         match cfg.device.build_input_stream(
             &cfg.config,
             {
-
-                // Closure reference to samples
-                let samples = self.samples.clone();
-
-                // Reference to on_data notify
-                let on_data = self.on_data.clone();
+                // Closure reference to next element
+                let next = self.next.clone().unwrap();
                 
                 move |data: &[f32], info| {
-                    // Copy the current samples into local memory
-                    for sample in data {
-                        samples.write().push(*sample);
-                    }
-
-                    // Notify any interested parties
-                    if let Some(on_data) = &on_data {
-                        let derp = samples.read();
-                        let herp = [derp.len() - data.len() .. derp.len()];
-                        on_data.send(());
-                    }
+                    // Notify next pipeline element
+                    next.write().process(data).unwrap();
                 }
             },
             move |err| {
@@ -75,20 +59,18 @@ impl Source for CpalSource {
                         self.stream = Some(stream);
                         Ok(())
                     },
-                    Err(error) => Err(Self::Error::from(pipeline::Error::from(error))),
+                    Err(error) => Err(Error::platform(&error)),
                 }
             },
-            Err(error) => {
-                Err(Self::Error::from(pipeline::Error::from(error)))
-            }
+            Err(error) => Err(Error::platform(&error)),
         }
     }
 
-    fn pause(&mut self) -> Result<(), Self::Error> {
-        Err(Self::Error::from(pipeline::Error::CannotPause(format!("{:?}", self.audioinputdevice))))
+    fn pause(&mut self) -> Result<(), Error> {
+        Err(Error::CannotPause(format!("{:?}", self.audioinputdevice)))
     }
 
-    fn stop(&mut self) -> Result<(), Self::Error> {
+    fn stop(&mut self) -> Result<(), Error> {
         if let Some(stream) = self.stream.take() {
             stream.pause().ok();
             drop(stream);
@@ -99,11 +81,25 @@ impl Source for CpalSource {
     fn can_pause(&self) -> bool {
         false
     }
+
+    fn is_recorder(&self) -> bool {
+        true
+    }
     
     fn state(&self) -> State {
         match self.stream {
             Some(_) => State::Playing,
             None => State::Paused,
         }
+    }
+}
+
+impl Source for CpalSource {
+    fn next_element(&self) -> Option<Arc<RwLock<dyn Sink>>> {
+        self.next.clone()
+    }
+    
+    fn set_next_element(&mut self, element: Arc<RwLock<dyn Sink>>) {
+        self.next = Some(element);
     }
 }

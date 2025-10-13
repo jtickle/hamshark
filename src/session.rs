@@ -1,42 +1,50 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
-use crate::{config::Settings, data::{audio::Clip, audioinput::AudioInputDevice}};
-use chrono::{DateTime, Local};
-use cpal::{traits::{DeviceTrait, StreamTrait}, InputStreamTimestamp, Stream};
+use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::Arc};
+use crate::{config::Settings, data::{audio::{self, Clip, ClipId, WavClip}, audioinput::AudioInputDevice}, pipeline, tools::{self, SampleRecorder}};
+use chrono::{Local};
 use hound::{SampleFormat, WavSpec};
-use log::{debug, error, info, trace};
+use log::{debug, error, info};
 use parking_lot::RwLock;
-use rand::prelude::*;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{fs, io};
-use thiserror::Error;
+use thiserror::Error as ThisError;
 
 const SESSIONFILE: &str = "session.toml";
 const FFTSIZE: usize = 128;
 
-#[derive(Debug, Error)]
+#[derive(Debug, ThisError)]
 pub enum Error {
     #[error("Tried to record new clip but was already recording")]
     AlreadyRecording(),
-    #[error("Tried to stop but was not running")]
-    NotRunning(),
     #[error("No audio configuration provided")]
     NoAudioConfiguration(),
+    #[error("No such clip ID {0}")]
+    NoSuchClip(ClipId),
+    #[error("Clip Already Exists {0}")]
+    ClipAlreadyExists(ClipId),
     #[error("Error scanning session directory: {0}")]
     DirectoryRead(#[source] io::Error),
     #[error("Error creating clip: {0}")]
     CreateClip(#[from] hound::Error),
+    #[error("Pipeline Error: {0}")]
+    Pipeline(#[from] pipeline::Error),
+    #[error("Recording Error: {0}")]
+    Recording(#[from] tools::Error),
+    #[error("Audio Error: {0}")]
+    Audio(#[from] audio::Error),
+    #[error("IO Error: {0}")]
+    IO(#[from] io::Error),
 }
+
+pub type Frequencies = Arc<RwLock<Vec<Vec<Complex<f32>>>>>;
 
 pub struct Session {
     pub path: PathBuf,
-    clips: Vec<Arc<RwLock<Clip>>>,
+    clips: BTreeMap<ClipId, Clip>,
+
+    recorder: Option<SampleRecorder>,
 
     fft: Arc<dyn Fft<f32>>,
     audioconfig: Option<AudioInputDevice>,
-    stream: Option<Stream>,
-
-    raw_amplitudes: Arc<RwLock<Vec<f32>>>,
-    fft_results: Arc<RwLock<Vec<Vec<Complex<f32>>>>>,
 }
 
 fn create_filename_from_now() -> String {
@@ -52,9 +60,8 @@ fn create_base_path_by_datetime(base: &Path) -> Result<PathBuf, io::Error> {
 }
 
 impl Session {
-    pub fn from_settings(settings: &Settings) -> Result<Session, hound::Error> {
+    pub fn from_settings(settings: &Settings) -> Result<Session, Error> {
         let base_dir = settings.session_base_dir.as_path();
-        let now = Local::now();
         let path = create_base_path_by_datetime(base_dir)?;
 
         let mut planner = FftPlanner::<f32>::new();
@@ -63,11 +70,9 @@ impl Session {
         let mut session = Session {
             path,
             clips: Default::default(),
+            recorder: None,
             fft,
             audioconfig: None,
-            stream: None,
-            raw_amplitudes: Arc::new(RwLock::new(Vec::new())),
-            fft_results: Arc::new(RwLock::new(Vec::new())),
         };
 
         session.rescan_clips()?;
@@ -81,17 +86,17 @@ impl Session {
                 return Ok(());
             }
         }
-        let was_started = self.is_started();
+        let was_recording = self.is_recording();
 
-        if was_started {
-            self.stop()?;
+        if was_recording {
+            self.stop_recording()?;
         }
 
         self.audioconfig = Some(newconfig);
         debug!("Session configured with audio input device {:?}", self.audioconfig);
 
-        if was_started {
-            self.start()?;
+        if was_recording {
+            self.record_new_clip()?;
         }
 
         Ok(())
@@ -105,45 +110,30 @@ impl Session {
         self.audioconfig.as_ref().map(|x| x.clone())
     }
 
-    pub fn is_started(&self) -> bool {
-        self.stream.is_some()
+    pub fn clip_ids(&self) -> Vec<ClipId> {
+        self.clips.keys().cloned().collect()
     }
 
-    pub fn clips(&self) -> &Vec<Arc<RwLock<Clip>>> {
-        &self.clips
+    pub fn clips(&self) -> Vec<Clip> {
+        self.clips.values().cloned().collect()
     }
 
-    pub fn open_clip(&self, clip: &Clip) -> Result<(), hound::Error> {
-        for clip_arc in &self.clips {
-            let path = {
-                let arc_read = clip_arc.read();
-                arc_read.path.clone()
-            };
-            if path == clip.path {
-                let mut dest = clip_arc.write();
-                dest.open();
-            }
-        }
-        Ok(())
+    pub fn clip_id_to_abs_path(&self, clip_id: &ClipId) -> PathBuf {
+        clip_id.absolute_path_wav(&self.path)
     }
 
-    pub fn update_clip(&mut self, path: &Path) {
-        for clip in self.clips() {
-            if clip.read().path == path {
-                return;
-            }
-        }
-        self.clips.push(Arc::new(RwLock::new(Clip::from(path))));
-    }
-
-    pub fn rescan_clips(&mut self) -> Result<(), hound::Error> {
+    pub fn rescan_clips(&mut self) -> Result<(), Error> {
         for result in fs::read_dir(self.path.as_path())? {
             let entry = result?;
             if entry.file_type()?.is_file() {
-                let pathbuf = PathBuf::from(entry.file_name());
-                if let Some(ext) = pathbuf.extension() {
-                    if ext == "wav" {
-                        self.update_clip(pathbuf.as_path())
+                if let Some(clip_id) = ClipId::from_path_ref(&entry.path()) {
+                    if self.clip(&clip_id).is_err() {
+                        let clip = Arc::new(
+                        RwLock::new(
+                            WavClip::from_file(&entry.path())?
+                            )
+                        );
+                        self.clips.insert(clip_id, clip);
                     }
                 }
             }
@@ -151,54 +141,70 @@ impl Session {
         Ok(())
     }
 
-    pub fn get_recording_clip(&self) -> Option<Arc<RwLock<Clip>>> {
-        for clip in &self.clips {
-            if clip.read().is_writable() {
-                return Some(clip.clone());
-            }
-        }
-        None
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
     }
 
     pub fn record_new_clip(&mut self) -> Result<(), Error> {
-        if self.get_recording_clip().is_some() {
+        if self.is_recording() {
             return Err(Error::AlreadyRecording());
         }
         if !self.is_configured() {
             return Err(Error::NoAudioConfiguration());
         }
+
         let cfg = self.audioconfig.as_ref().unwrap();
 
-        let mut clipname = self.path.clone();
-        clipname.push(create_filename_from_now());
-        clipname.set_extension("wav");
-        
+        let clip_id = ClipId::from_datetimelocal(Local::now());
+
+        if self.clip(&clip_id).is_ok() {
+            return Err(Error::ClipAlreadyExists(clip_id))
+        }
+
         let spec = WavSpec {
             channels: 1,
             sample_rate: cfg.config.sample_rate.0,
             bits_per_sample: 16,
             sample_format: SampleFormat::Int
         };
-        let clip = Arc::new(RwLock::new(Clip::new(clipname.as_path(), spec)?));
-        self.clips.push(clip.clone());
+        let clip = Arc::new(
+            RwLock::new(
+                WavClip::record_new(
+                    clip_id.clone(), 
+                    self.path.as_path(), 
+                    spec)?
+                )
+            );
+
+        self.clips.insert(clip_id, clip.clone());
+
+        // SampleRecorder starts as soon as it is created
+        self.recorder = Some(SampleRecorder::new(cfg, clip)?);
 
         Ok(())
     }
 
+    pub fn stop_recording(&mut self) -> Result<(), Error> {
+        if let Some(recorder) = self.recorder.take() {
+            recorder.close()?;
+        }
+        Ok(())
+    }
+
     pub fn start(&mut self) -> Result<(), Error> {
-        if self.is_started() {
+        /*if self.is_started() {
             return Err(Error::AlreadyRecording())
         }
 
         // Build filename for new clip
-        let clip = self.record_new_clip()?;
+        let clip = self.record()?;
 
         if !self.is_configured() {
             return Err(Error::NoAudioConfiguration())
         }
         let cfg = self.audioconfig.as_ref().unwrap();
 
-        /*let mut last_ts: Option<InputStreamTimestamp> = None;
+        let mut last_ts: Option<InputStreamTimestamp> = None;
         let mut buffer = vec![Complex{ re: 0.0, im: 0.0}; FFTSIZE];
         let mut buffer_index = 0usize;
         let mut data_index = 0usize;
@@ -282,23 +288,11 @@ impl Session {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> Result<(), Error> {
-        if !self.is_started() {
-            return Err(Error::NotRunning())
+    pub fn clip(&self, clip_id: &ClipId) -> Result<Clip, Error> {
+        if let Some(clip) = self.clips.get(clip_id) {
+            Ok(clip.clone())
+        } else {
+            Err(Error::NoSuchClip(clip_id.clone()))
         }
-
-        let stream = self.stream.take().unwrap();
-        stream.pause().unwrap();
-        drop(stream);
-
-        Ok(())
-    }
-
-    pub fn samples(&self) -> Arc<RwLock<Vec<f32>>> {
-        self.raw_amplitudes.clone()
-    }
-
-    pub fn fft(&self) -> Arc<RwLock<Vec<Vec<Complex<f32>>>>> {
-        self.fft_results.clone()
     }
 }

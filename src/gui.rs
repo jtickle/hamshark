@@ -1,6 +1,8 @@
 mod audioinput;
 mod timeline;
 
+use std::collections::BTreeMap;
+
 use chrono::Utc;
 use eframe::egui::{
         CentralPanel, Context
@@ -21,6 +23,8 @@ pub struct HamSharkGui {
     config: Configuration,
     settings: Settings,
 
+    open_clips: BTreeMap<String, Timeline>,
+
     audio_input_selecting: Option<AudioInputDeviceBuilder>,
 }
 
@@ -30,6 +34,7 @@ impl HamSharkGui {
             session,
             config,
             settings,
+            open_clips: Default::default(),
             audio_input_selecting: None,
         }
     }
@@ -64,7 +69,7 @@ impl eframe::App for HamSharkGui {
         // Tool Bar
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             let button = Button::new("➕");
-            let enabled = self.session.get_recording_clip().is_none();
+            let enabled = ! self.session.is_recording();
             if ui.add_enabled(enabled, button).clicked() {
                 info!("clicked");
                 self.session.record_new_clip().unwrap();
@@ -83,11 +88,11 @@ impl eframe::App for HamSharkGui {
                 }
                 ui.separator();
                 if ui.button("GPLv3").clicked() {
-                    open::that(GPLV3).expect(format!("Could not open browser to GPLv3 at {} ... fortunately this software is open source, so you can fix that bug!", GPLV3).as_str());
+                    open::that(GPLV3).expect(format!("Could not open browser to GPLv3 at {} ... fortunately this is Free software, so you can fix that bug!", GPLV3).as_str());
                 }
                 ui.separator();
                 if ui.button("Source").clicked() {
-                    open::that(REPO).expect(format!("Could not open browser to code repository at {} ... fortunately this software is open source, so you ca nfix that bug!", REPO).as_str());
+                    open::that(REPO).expect(format!("Could not open browser to code repository at {} ... fortunately this is Free software, so you can fix that bug!", REPO).as_str());
                 }
             })
         });
@@ -100,16 +105,15 @@ impl eframe::App for HamSharkGui {
                     ui.separator();
                 }
                 first = false;
-
-                let file_name = {
-                    let clip = clip_arc.read();
-                    clip
-                        .path
-                        .file_name()
-                        .expect("file name to exist").to_str().expect("file name to be representable as str").to_owned()
-                };
-                if ui.button(file_name).clicked() {
-                    clip_arc.write().open().unwrap();
+                let filename = clip_arc.read().path.file_name().unwrap().to_str().unwrap().to_string();
+                if ui.button(filename.clone()).clicked() {
+                    self.open_clips.insert(
+                        filename,
+                        Timeline::new(
+                            clip_arc.clone(),
+                            self.session.configuration().unwrap().config.sample_rate,
+                        )
+                    );
                 };
             }
         });
@@ -118,34 +122,33 @@ impl eframe::App for HamSharkGui {
         CentralPanel::default().show(ctx, |ui| {
             log::trace!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
 
-            // For each open clip, show analysis
-            for clip_arc in self.session.clips() {
-                let clip = clip_arc.read();
-                if ! clip.is_open() {
-                    continue;
-                }
-                let filename = clip.path.file_name().unwrap().to_str().unwrap();
+            // TODO: extract the window and timeline out
+            // Analysis - show window
+            // OpenClip - hold the transient data for GUI ie texture cache
+            // Split Timeline into Samples, Waterfall; tie together with Scroll
+            //  (I think)
+            let mut cleanup: Vec<String> = Vec::new();
+            for timeline in self.open_clips.iter_mut() {
                 let mut open = true;
-                egui::Window::new(filename)
+                egui::Window::new(timeline.0.clone())
                     .constrain_to(ui.clip_rect())
                     .scroll(true)
                     .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
                     .open(&mut open)
                     .show(ctx, |ui| {
-                        Timeline::new(
-                            clip.samples().unwrap(),
-                            Default::default(),
-                            self.session.configuration().unwrap().config.sample_rate,
-                        ).show(ui);
+                        timeline.1.show(ui);
                     });
-                // Done with clip... also otherwise the upcoming write attempt will freeze
-                drop(clip);
 
                 // Detect user closed window, in which case we remove the clip from open clips
                 if ! open {
-                    clip_arc.write().close();
+                    // Collect for later deletion since we can't delete it right now
+                    cleanup.push(timeline.0.clone());
                 }
-            };
+            }
+            // Cleanup closed clips
+            for filename in cleanup {
+                self.open_clips.remove(&filename);
+            }
 
             match self.audio_input_selecting.take() {
                 Some(mut data) => {
@@ -170,7 +173,7 @@ impl eframe::App for HamSharkGui {
         //debug!("Frame drawn in {}", Utc::now() - begin);
 
         // Request repaint if we're "running"
-        if self.session.is_started() {
+        if self.session.is_recording() {
             ctx.request_repaint();
         }
     }

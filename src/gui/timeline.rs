@@ -1,9 +1,10 @@
-use std::{ops::Range, sync::Arc};
+use std::ops::Range;
 use cpal::SampleRate;
 use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Sense, TextureOptions, Vec2};
 use log::debug;
 use parking_lot::RwLock;
 use rustfft::num_complex::Complex;
+use crate::{data::audio::Clip, session::Frequencies};
 
 pub struct Timeline {
     /// The desired screen height of the timeline control
@@ -12,10 +13,8 @@ pub struct Timeline {
     scale: f32,
     /// How many samples per FFT
     samples_per_fft: usize,
-    /// Arc RwLock pointer to the samples from live or prerecorded data
-    samples: Arc<RwLock<Vec<f32>>>,
-    /// Arc RwLock pointer to the fft data
-    fft: Arc<RwLock<Vec<Vec<Complex<f32>>>>>,
+    /// The clip we're browsing
+    clip: Clip,
     /// The "start" offset in screen space
     offset: usize,
     /// The sample rate
@@ -25,10 +24,9 @@ pub struct Timeline {
 }
 
 impl Timeline {    
-    pub fn new(samples: Arc<RwLock<Vec<f32>>>, fft: Arc<RwLock<Vec<Vec<Complex<f32>>>>>, sample_rate: SampleRate) -> Self {
+    pub fn new(clip: Clip, sample_rate: SampleRate) -> Self {
         Self {
-            samples,
-            fft,
+            clip,
             offset: 0,
             samples_per_fft: 128,
             height: 256,
@@ -137,10 +135,11 @@ impl Timeline {
         );
 
         // Acquire read lock on samples
-        let samples = self.samples.read();
+        let samples = &self.clip.read().samples;
 
         // Acquire read lock on fft
-        let fft = self.fft.read();
+        //let fft_derp: Frequencies = Default::default(); //self.fft.read();
+        //let fft = fft_derp.read();
 
         // If live, move with the live data
         if self.live {
@@ -183,7 +182,7 @@ impl Timeline {
 
             // Now build the FFT image
             // There are always more samples than FFT data so if we get this far we are good
-            let fft_range = self.screen_to_fft_range(i + self.sample_to_screen(self.offset % self.samples_per_fft), fft.len());
+            /*let fft_range = self.screen_to_fft_range(i + self.sample_to_screen(self.offset % self.samples_per_fft), fft.len());
             if fft_range.is_empty() {
                 // TODO: if there is more fft data and the scale is too fine, just include the
                 // next datapoint so we smear the FFT display over multiple pixels
@@ -213,7 +212,7 @@ impl Timeline {
                     );*/
                 waterfall_image[self.screen_to_image_idx(width, i, j)] =
                     Color32::from_gray((magnitude * 255f32).floor() as u8);
-            }
+            }*/
         }
 
         // Draw a vertical line for the current pointer position, if any
@@ -229,8 +228,7 @@ impl Timeline {
             }
         }
 
-        drop(fft);
-        drop(samples);
+        //drop(fft);
 
         let amplitude_texture = ui.ctx().load_texture(
             "samples",
@@ -279,14 +277,14 @@ impl Timeline {
         }
 
         // Show the waterfall
-        let waterfall_size = waterfall_texture.size_vec2();
+        /*let waterfall_size = waterfall_texture.size_vec2();
         let waterfall_sized_texture = SizedTexture::new(&waterfall_texture, waterfall_size);
         let waterfall_image_widget = Image::new(waterfall_sized_texture)
             .sense(Sense::click_and_drag());
         let waterfall_response = ui.add(waterfall_image_widget);
         if waterfall_response.is_pointer_button_down_on() {
             drag_action(waterfall_response.drag_delta());
-        }
+        }*/
 
         // Show the IQ diagram
         let iq_size = iq_texture.size_vec2();

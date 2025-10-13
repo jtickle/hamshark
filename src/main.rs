@@ -9,6 +9,7 @@ mod config;
 mod session;
 mod data;
 mod pipeline;
+mod tools;
 
 fn main() -> eframe::Result<()>{
     env_logger::init();
