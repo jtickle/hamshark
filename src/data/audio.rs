@@ -1,5 +1,6 @@
 use std::{fmt::Display, fs::File, io::BufWriter, path::{Path, PathBuf}, sync::Arc};
 use chrono::{DateTime, Local};
+use cpal::SampleRate;
 use hound::{WavReader, WavSpec, WavWriter};
 use log::debug;
 use parking_lot::RwLock;
@@ -53,11 +54,11 @@ impl AsRef<Path> for ClipId {
     }
 }
 
-
 pub struct WavClip {
     pub(crate) id: ClipId,
     pub(crate) path: PathBuf,
     pub samples: Samples,
+    pub sample_rate: SampleRate,
     pub(crate) writer: Option<WavWriter<BufWriter<File>>>,
 }
 
@@ -71,6 +72,7 @@ impl WavClip {
             id,
             path,
             samples: Default::default(),
+            sample_rate: SampleRate(spec.sample_rate),
             writer: Some(writer),
         })
     }
@@ -83,10 +85,12 @@ impl WavClip {
                     id,
                     path: pathbuf,
                     samples: Default::default(),
+                    sample_rate: SampleRate(0),
                     writer: None,
                 };
 
                 let mut reader = WavReader::open(path)?;
+                clip.sample_rate = SampleRate(reader.spec().sample_rate);
                 for sample in reader.samples::<i16>() {
                     clip.samples.push(Self::i16_to_f32(sample?));
                 }

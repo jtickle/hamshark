@@ -1,6 +1,6 @@
 use std::ops::Range;
 use cpal::SampleRate;
-use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Sense, TextureOptions, Vec2};
+use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Key, Sense, TextureOptions, Vec2};
 use log::debug;
 use parking_lot::RwLock;
 use rustfft::num_complex::Complex;
@@ -24,7 +24,9 @@ pub struct Timeline {
 }
 
 impl Timeline {    
-    pub fn new(clip: Clip, sample_rate: SampleRate) -> Self {
+    pub fn new(clip: Clip) -> Self {
+        let sample_rate = clip.read().sample_rate;
+
         Self {
             clip,
             offset: 0,

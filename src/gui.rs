@@ -1,16 +1,14 @@
-mod audioinput;
-mod timeline;
-
-use std::collections::BTreeMap;
+pub mod audioinput;
+pub mod timeline;
+pub mod audio;
 
 use chrono::Utc;
 use eframe::egui::{
         CentralPanel, Context
     };
-use egui::scroll_area::ScrollBarVisibility;
 use egui::Button;
 use log::info;
-use crate::{data::audioinput::AudioInputDeviceBuilder, gui::timeline::Timeline, session::Session};
+use crate::{data::audioinput::AudioInputDeviceBuilder, session::Session};
 use crate::config::{Configuration, Settings};
 
 use open;
@@ -23,8 +21,6 @@ pub struct HamSharkGui {
     config: Configuration,
     settings: Settings,
 
-    open_clips: BTreeMap<String, Timeline>,
-
     audio_input_selecting: Option<AudioInputDeviceBuilder>,
 }
 
@@ -34,7 +30,6 @@ impl HamSharkGui {
             session,
             config,
             settings,
-            open_clips: Default::default(),
             audio_input_selecting: None,
         }
     }
@@ -99,57 +94,17 @@ impl eframe::App for HamSharkGui {
 
         // Session Overview
         egui::SidePanel::left("clips").show(ctx, |ui| {
-            let mut first = true;
-            for clip_arc in self.session.clips() {
-                if ! first {
-                    ui.separator();
-                }
-                first = false;
-                let filename = clip_arc.read().path.file_name().unwrap().to_str().unwrap().to_string();
-                if ui.button(filename.clone()).clicked() {
-                    self.open_clips.insert(
-                        filename,
-                        Timeline::new(
-                            clip_arc.clone(),
-                            self.session.configuration().unwrap().config.sample_rate,
-                        )
-                    );
-                };
-            }
+            self.session.clips.show_clip_list(ui);
         });
 
         // Main content panel
         CentralPanel::default().show(ctx, |ui| {
             log::trace!("Updating GUI, dt is {}", ctx.input(|i| i.stable_dt));
 
-            // TODO: extract the window and timeline out
-            // Analysis - show window
-            // OpenClip - hold the transient data for GUI ie texture cache
-            // Split Timeline into Samples, Waterfall; tie together with Scroll
-            //  (I think)
-            let mut cleanup: Vec<String> = Vec::new();
-            for timeline in self.open_clips.iter_mut() {
-                let mut open = true;
-                egui::Window::new(timeline.0.clone())
-                    .constrain_to(ui.clip_rect())
-                    .scroll(true)
-                    .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
-                    .open(&mut open)
-                    .show(ctx, |ui| {
-                        timeline.1.show(ui);
-                    });
+            // Show all of the open clip viewers
+            self.session.clips.show_editor_windows(ui);
 
-                // Detect user closed window, in which case we remove the clip from open clips
-                if ! open {
-                    // Collect for later deletion since we can't delete it right now
-                    cleanup.push(timeline.0.clone());
-                }
-            }
-            // Cleanup closed clips
-            for filename in cleanup {
-                self.open_clips.remove(&filename);
-            }
-
+            // Show audio configuration if open
             match self.audio_input_selecting.take() {
                 Some(mut data) => {
                     let mut should_save = false;

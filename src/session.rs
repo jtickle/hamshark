@@ -1,5 +1,5 @@
 use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::Arc};
-use crate::{config::Settings, data::{audio::{self, Clip, ClipId, WavClip}, audioinput::AudioInputDevice}, pipeline, tools::{self, SampleRecorder}};
+use crate::{config::Settings, data::{audio::{self, Clip, ClipId, WavClip}, audioinput::AudioInputDevice}, gui::audio::{ClipEditor, OpenClips}, pipeline, tools::{self, SampleRecorder}};
 use chrono::{Local};
 use hound::{SampleFormat, WavSpec};
 use log::{debug, error, info};
@@ -21,8 +21,6 @@ pub enum Error {
     NoSuchClip(ClipId),
     #[error("Clip Already Exists {0}")]
     ClipAlreadyExists(ClipId),
-    #[error("Error scanning session directory: {0}")]
-    DirectoryRead(#[source] io::Error),
     #[error("Error creating clip: {0}")]
     CreateClip(#[from] hound::Error),
     #[error("Pipeline Error: {0}")]
@@ -39,7 +37,7 @@ pub type Frequencies = Arc<RwLock<Vec<Vec<Complex<f32>>>>>;
 
 pub struct Session {
     pub path: PathBuf,
-    clips: BTreeMap<ClipId, Clip>,
+    pub clips: OpenClips,
 
     recorder: Option<SampleRecorder>,
 
@@ -110,30 +108,26 @@ impl Session {
         self.audioconfig.as_ref().map(|x| x.clone())
     }
 
-    pub fn clip_ids(&self) -> Vec<ClipId> {
-        self.clips.keys().cloned().collect()
-    }
-
-    pub fn clips(&self) -> Vec<Clip> {
-        self.clips.values().cloned().collect()
-    }
-
-    pub fn clip_id_to_abs_path(&self, clip_id: &ClipId) -> PathBuf {
-        clip_id.absolute_path_wav(&self.path)
-    }
-
     pub fn rescan_clips(&mut self) -> Result<(), Error> {
         for result in fs::read_dir(self.path.as_path())? {
             let entry = result?;
             if entry.file_type()?.is_file() {
                 if let Some(clip_id) = ClipId::from_path_ref(&entry.path()) {
-                    if self.clip(&clip_id).is_err() {
-                        let clip = Arc::new(
-                        RwLock::new(
-                            WavClip::from_file(&entry.path())?
-                            )
-                        );
-                        self.clips.insert(clip_id, clip);
+                    match self.clips.entry(clip_id) {
+                        std::collections::btree_map::Entry::Vacant(vacant_entry) => {
+                            vacant_entry.insert(
+                                ClipEditor::new(
+                                    Arc::new(
+                                        RwLock::new(
+                                            WavClip::from_file(
+                                                &entry.path()
+                                            )?
+                                        )
+                                    )
+                                )
+                            );
+                        },
+                        std::collections::btree_map::Entry::Occupied(_) => {}
                     }
                 }
             }
@@ -153,33 +147,49 @@ impl Session {
             return Err(Error::NoAudioConfiguration());
         }
 
-        let cfg = self.audioconfig.as_ref().unwrap();
+        let cfg = self.audioconfig.as_ref().unwrap().clone();
 
         let clip_id = ClipId::from_datetimelocal(Local::now());
 
-        if self.clip(&clip_id).is_ok() {
-            return Err(Error::ClipAlreadyExists(clip_id))
+        match self.clips.entry(clip_id.clone()) {
+            std::collections::btree_map::Entry::Vacant(vacant_entry) => {
+                // Clip does not exist, create it
+                let spec = WavSpec {
+                    channels: 1,
+                    sample_rate: cfg.config.sample_rate.0,
+                    bits_per_sample: 16,
+                    sample_format: SampleFormat::Int
+                };
+                let clip = Arc::new(
+                    RwLock::new(
+                        WavClip::record_new(
+                            clip_id, 
+                            self.path.as_path(), 
+                            spec)?
+                        )
+                    );
+                
+                // Recorder starts as soon as it is created
+                self.recorder = Some(SampleRecorder::new(&cfg, clip.clone())?);
+                vacant_entry.insert(ClipEditor::new(clip));
+
+                Ok(())
+            },
+            std::collections::btree_map::Entry::Occupied(_) => {
+                Err(Error::AlreadyRecording())
+            },
+        }
+    }
+
+    pub fn add_clip(&mut self, clip: Clip) -> Result<(), Error> {
+        let id = clip.read().id().clone();
+        if self.clips.contains_key(&id) {
+            return Ok(());
         }
 
-        let spec = WavSpec {
-            channels: 1,
-            sample_rate: cfg.config.sample_rate.0,
-            bits_per_sample: 16,
-            sample_format: SampleFormat::Int
-        };
-        let clip = Arc::new(
-            RwLock::new(
-                WavClip::record_new(
-                    clip_id.clone(), 
-                    self.path.as_path(), 
-                    spec)?
-                )
-            );
+        let editor = ClipEditor::new(clip);
 
-        self.clips.insert(clip_id, clip.clone());
-
-        // SampleRecorder starts as soon as it is created
-        self.recorder = Some(SampleRecorder::new(cfg, clip)?);
+        self.clips.insert(id, editor);
 
         Ok(())
     }
@@ -289,8 +299,8 @@ impl Session {
     }
 
     pub fn clip(&self, clip_id: &ClipId) -> Result<Clip, Error> {
-        if let Some(clip) = self.clips.get(clip_id) {
-            Ok(clip.clone())
+        if let Some(clip_editor) = self.clips.get(clip_id) {
+            Ok(clip_editor.clip.clone())
         } else {
             Err(Error::NoSuchClip(clip_id.clone()))
         }
