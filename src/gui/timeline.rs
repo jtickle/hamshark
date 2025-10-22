@@ -269,13 +269,21 @@ impl Timeline {
         let samples_size = amplitude_texture.size_vec2();
         let samples_sized_texture = SizedTexture::new(&amplitude_texture, samples_size);
         let samples_image_widget = Image::new(samples_sized_texture)
-            .sense(Sense::click_and_drag());
+            .sense(Sense::click_and_drag() | Sense::hover());
         let samples_response = ui.add(samples_image_widget);
         if samples_response.clicked() {
             debug!("Samples Clicked!!");
         }
         if samples_response.dragged() {
             drag_action(samples_response.drag_delta());
+        }
+        if samples_response.hovered() {
+            let ctx = ui.ctx();
+            ctx.input(|state| {
+                // Wrote a bunch of code to deal with ctrl and scroll and then found that egui does this for you
+                self.scale *= state.zoom_delta();
+                // TODO: use zoom_delta_2d to set amplitude scale as well, that would sure be nice
+            });
         }
 
         // Show the waterfall
