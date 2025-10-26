@@ -66,7 +66,6 @@ impl eframe::App for HamSharkGui {
             let button = Button::new("➕");
             let enabled = ! self.session.is_recording();
             if ui.add_enabled(enabled, button).clicked() {
-                info!("clicked");
                 self.session.record_new_clip().unwrap();
             }
         });

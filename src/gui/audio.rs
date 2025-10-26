@@ -1,17 +1,17 @@
-use std::{collections::{btree_map::Entry, BTreeMap}, ops::{Deref, DerefMut}};
+use std::{collections::BTreeMap, ops::{Deref, DerefMut}};
 
 use egui::{scroll_area::ScrollBarVisibility, Ui, Window};
 
 use crate::{data::audio::{Clip, ClipId}, gui::timeline::Timeline};
 
-pub struct ClipEditor {
+pub struct ClipExplorer {
     pub clip: Clip,
     pub open: bool,
     title: String,
     timeline: Timeline,
 }
 
-impl ClipEditor {
+impl ClipExplorer {
     pub fn new(clip: Clip) -> Self {
         let title = clip.read().id().to_string();
         let timeline = Timeline::new(clip.clone());
@@ -43,7 +43,7 @@ impl ClipEditor {
 }
 
 #[derive(Default)]
-pub struct OpenClips(BTreeMap<ClipId, ClipEditor>);
+pub struct OpenClips(BTreeMap<ClipId, ClipExplorer>);
 
 impl OpenClips {
     pub fn show_editor_windows(&mut self, ui: &mut egui::Ui) {
@@ -67,7 +67,7 @@ impl OpenClips {
 }
 
 impl Deref for OpenClips {
-    type Target = BTreeMap<ClipId, ClipEditor>;
+    type Target = BTreeMap<ClipId, ClipExplorer>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

@@ -1,3 +1,2 @@
-session - clip browser
-new recording = new clip
-clip editor - playback, slice into clips (requires robust undo)
+clip editor - playback, slice into clips (does not destroy original)
+timeline - show timestamps appropriate for resolution

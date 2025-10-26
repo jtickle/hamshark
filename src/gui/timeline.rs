@@ -1,16 +1,24 @@
 use std::ops::Range;
 use cpal::SampleRate;
-use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, Key, Sense, TextureOptions, Vec2};
+use egui::{load::SizedTexture, Color32, ColorImage, DragValue, Image, PointerButton, Pos2, Response, Sense, TextureOptions, Vec2};
 use log::debug;
-use parking_lot::RwLock;
 use rustfft::num_complex::Complex;
 use crate::{data::audio::Clip, session::Frequencies};
+
+#[derive(PartialEq)]
+enum DragState {
+    DownButNotDragging(Pos2),
+    Dragging,
+    NotDragging,
+}
 
 pub struct Timeline {
     /// The desired screen height of the timeline control
     height: usize,
     /// The desired horizontal scale (samples:pixel, so a scale of 5 means 5:1)
     scale: f32,
+    /// The desired vertical scale
+    vscale: f32,
     /// How many samples per FFT
     samples_per_fft: usize,
     /// The clip we're browsing
@@ -21,9 +29,14 @@ pub struct Timeline {
     sample_rate: SampleRate,
     /// Keep up with live
     live: bool,
+    /// Selection Markers
+    marker_begin: Option<usize>,
+    marker_end: Option<usize>,
+    /// Make drag operations more precise
+    drag_state: DragState,
 }
 
-impl Timeline {    
+impl Timeline {
     pub fn new(clip: Clip) -> Self {
         let sample_rate = clip.read().sample_rate;
 
@@ -33,8 +46,12 @@ impl Timeline {
             samples_per_fft: 128,
             height: 256,
             scale: 1024.0,
+            vscale: 1.0,
             sample_rate,
             live: true,
+            marker_begin: None,
+            marker_end: None,
+            drag_state: DragState::NotDragging,
         }
     }
 
@@ -76,7 +93,7 @@ impl Timeline {
 
     /// Translate screen coordinates to vector position
     fn screen_to_image_idx(&self, width: usize, x: usize, y: usize) -> usize {
-        ((y * width) + x) as usize
+        ((y.clamp(0, self.height - 1) * width) + x) as usize
     }
 
     /// Translate polar coordinates to vector position for IQ diagram
@@ -85,6 +102,12 @@ impl Timeline {
         let y = ((1.0 - (phase.sin() * magnitude)) * self.samples_per_fft as f32).floor() as usize;
         //debug!("{} {} {} {}", phase.cos(), 1.0 + phase.cos(), (1.0 + phase.cos()) * magnitude, (1.0 + phase.cos()) * magnitude * self.samples_per_fft as f32);
         (y.clamp(0, self.samples_per_fft * 2 - 1) * self.samples_per_fft * 2) + x.clamp(0, self.samples_per_fft * 2 - 1)
+    }
+
+    /// Translate a sample to a screen coordinate
+    fn sample_to_y_coordinate(&self, sample: f32) -> usize {
+        let halfheight = self.height as f32 / 2f32;
+        (self.vscale * sample * halfheight + halfheight) as usize
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -105,8 +128,19 @@ impl Timeline {
                 .prefix("Scale: ")
             ).on_hover_text("Scales the timeline view to N samples per 1 pixel.");
 
+            ui.add(DragValue::new(&mut self.vscale)
+                .range(1.0f32..=200.0f32)
+                .prefix("VScale: ")
+            ).on_hover_text("Scales the timeline amplitude");
+
             if !self.live && prevscale != self.scale {
-                self.offset = self.sample_to_screen(sampleoffset) - width/2;
+                let halfwidth = width / 2;
+                let uncentered_offset = self.sample_to_screen(sampleoffset);
+                self.offset = if halfwidth > uncentered_offset {
+                    0
+                } else {
+                    uncentered_offset - halfwidth
+                }
             }
         });
 
@@ -168,19 +202,37 @@ impl Timeline {
                 break;
             }
 
+            // If the range only contains one sample, just draw one sample. This means scaling factor is 1.
+            if sample_range.len() == 1 {
+                let y = self.sample_to_y_coordinate(samples[sample_range.min().unwrap()]);
+                let color = if y == 0 || y > height - 1 {
+                    Color32::from_rgb(255, 0, 0)
+                } else {
+                    Color32::from_rgb(127, 127, 255)
+                };
+                amplitude_image[self.screen_to_image_idx(width, i, y)] = color;
+                continue;
+            }
+
+            // Otherwise we draw a range
             let bucket = &samples[sample_range];
 
             // Take the maximum and minimum values over the samples in this bucket
-            let (f32max, f32min) = bucket.iter().fold((0f32, 0f32),
+            let (f32max, f32min) = bucket.iter().fold((f32::MIN, f32::MAX),
                 |acc, x| (acc.0.max(*x), acc.1.min(*x))
             );
 
-            let halfheight = (height/2) as f32;
+            let displaymax = self.sample_to_y_coordinate(f32max);
+            let displaymin = self.sample_to_y_coordinate(f32min);
 
-            let displaymax = (f32max * halfheight + halfheight).floor() as usize;
-            let displaymin = (f32min * halfheight + halfheight).floor() as usize;
-            amplitude_image[self.screen_to_image_idx(width, i, displaymax)] = Color32::from_rgb(0, 255, 0);
-            amplitude_image[self.screen_to_image_idx(width, i, displaymin)] = Color32::from_rgb(255, 0, 0);
+            for y in displaymin..displaymax {
+                let color = if y == 0 || y > height - 1 {
+                    Color32::from_rgb(255, 0, 0)
+                } else {
+                    Color32::from_rgb(127, 127, 255)
+                };
+                amplitude_image[self.screen_to_image_idx(width, i, y)] = color
+            }
 
             // Now build the FFT image
             // There are always more samples than FFT data so if we get this far we are good
@@ -250,7 +302,7 @@ impl Timeline {
             TextureOptions::NEAREST,
         );
 
-        let mut drag_action = |delta: Vec2| {
+        let mut pan_action = |delta: Vec2| {
             self.live = false;
             let val = delta.x;
             let mag = val.abs().floor() as usize;
@@ -271,19 +323,48 @@ impl Timeline {
         let samples_image_widget = Image::new(samples_sized_texture)
             .sense(Sense::click_and_drag() | Sense::hover());
         let samples_response = ui.add(samples_image_widget);
-        if samples_response.clicked() {
-            debug!("Samples Clicked!!");
+
+        // In egui, the "drag" deltas start reporting after the mouse has moved, and so if you click
+        // precisely where you mean to begin the drag, it will not begin where you expected.
+        // Submitting a patch to egui is probably the better solution here...
+        if samples_response.is_pointer_button_down_on() {
+            if self.drag_state == DragState::NotDragging
+            && let Some(pos) = ui.input(|input| input.pointer.interact_pos()) {
+                self.drag_state = DragState::DownButNotDragging(pos);
+            } 
+        } else {
+            self.drag_state = DragState::NotDragging;
         }
-        if samples_response.dragged() {
-            drag_action(samples_response.drag_delta());
+
+        let mut get_delta = |response: &Response| -> Vec2 {
+            match self.drag_state {
+                DragState::DownButNotDragging(pos) => {
+                    if let Some(cur) = ui.input(|input| input.pointer.interact_pos()) {
+                        self.drag_state = DragState::Dragging;
+                        cur - pos
+                    } else {
+                        panic!("In dragging state but no current mouse position")
+                    }
+                },
+                DragState::Dragging => response.drag_delta(),
+                DragState::NotDragging => panic!("Should not be able to get to this state"),
+            }
+        };
+
+        // Only one of these can apply
+        if samples_response.dragged_by(PointerButton::Primary) {
+            if self.marker_begin.is_none() && let DragState::DownButNotDragging(begin) = self.drag_state {
+                self.marker_begin = Some(self.screen_to_sample(begin.x as usize));
+                println!("Start set to {:?}", self.marker_begin);
+            }
         }
+        else if samples_response.dragged_by(PointerButton::Secondary) {
+            pan_action(get_delta(&samples_response));
+        }
+
+        // This can always apply
         if samples_response.hovered() {
-            let ctx = ui.ctx();
-            ctx.input(|state| {
-                // Wrote a bunch of code to deal with ctrl and scroll and then found that egui does this for you
-                self.scale *= state.zoom_delta();
-                // TODO: use zoom_delta_2d to set amplitude scale as well, that would sure be nice
-            });
+            self.scale *= ui.input(|input| input.zoom_delta());
         }
 
         // Show the waterfall

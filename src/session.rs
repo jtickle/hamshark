@@ -1,5 +1,5 @@
 use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::Arc};
-use crate::{config::Settings, data::{audio::{self, Clip, ClipId, WavClip}, audioinput::AudioInputDevice}, gui::audio::{ClipEditor, OpenClips}, pipeline, tools::{self, SampleRecorder}};
+use crate::{config::Settings, data::{audio::{self, Clip, ClipId, WavClip}, audioinput::AudioInputDevice}, gui::audio::{ClipExplorer, OpenClips}, pipeline, tools::{self, SampleRecorder}};
 use chrono::{Local};
 use hound::{SampleFormat, WavSpec};
 use log::{debug, error, info};
@@ -116,7 +116,7 @@ impl Session {
                     match self.clips.entry(clip_id) {
                         std::collections::btree_map::Entry::Vacant(vacant_entry) => {
                             vacant_entry.insert(
-                                ClipEditor::new(
+                                ClipExplorer::new(
                                     Arc::new(
                                         RwLock::new(
                                             WavClip::from_file(
@@ -171,7 +171,7 @@ impl Session {
                 
                 // Recorder starts as soon as it is created
                 self.recorder = Some(SampleRecorder::new(&cfg, clip.clone())?);
-                vacant_entry.insert(ClipEditor::new(clip));
+                vacant_entry.insert(ClipExplorer::new(clip));
 
                 Ok(())
             },
@@ -187,7 +187,7 @@ impl Session {
             return Ok(());
         }
 
-        let editor = ClipEditor::new(clip);
+        let editor = ClipExplorer::new(clip);
 
         self.clips.insert(id, editor);
 
