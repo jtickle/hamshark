@@ -1,11 +1,16 @@
-use std::{collections::BTreeMap, ops::{Deref, DerefMut}};
+use std::{
+    collections::BTreeMap,
+    ops::{Deref, DerefMut},
+};
 
-use egui::{scroll_area::ScrollBarVisibility, Ui, Window};
+use egui::{Ui, Window, scroll_area::ScrollBarVisibility};
 
-use crate::{data::audio::{Clip, ClipId}, gui::timeline::Timeline};
+use crate::{
+    data::audio::{Clip, ClipId},
+    gui::timeline::Timeline,
+};
 
 pub struct ClipExplorer {
-    pub clip: Clip,
     pub open: bool,
     title: String,
     timeline: Timeline,
@@ -14,9 +19,8 @@ pub struct ClipExplorer {
 impl ClipExplorer {
     pub fn new(clip: Clip) -> Self {
         let title = clip.read().id().to_string();
-        let timeline = Timeline::new(clip.clone());
+        let timeline = Timeline::new(clip);
         Self {
-            clip,
             title,
             timeline,
             open: true,
@@ -37,7 +41,7 @@ impl ClipExplorer {
             .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
             .open(&mut self.open)
             .show(ctx, |ui| {
-                self.timeline.show(ui);
+                self.timeline.update_and_show(ui);
             });
     }
 }
@@ -55,7 +59,7 @@ impl OpenClips {
     pub fn show_clip_list(&mut self, ui: &mut egui::Ui) {
         let mut first = true;
         for (clip_id, clipeditor) in self.0.iter_mut() {
-            if ! first {
+            if !first {
                 ui.separator();
             }
             first = false;

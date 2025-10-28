@@ -1133,6 +1133,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "935df67dc48fdeef132f2f7ada156ddc79e021344dd42c17f066b956bb88dde3"
 dependencies = [
  "bytemuck",
+ "mint",
 ]
 
 [[package]]
@@ -1583,6 +1584,7 @@ dependencies = [
  "env_logger",
  "hound",
  "log",
+ "mint",
  "open",
  "parking_lot",
  "rand",
@@ -2057,6 +2059,12 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
+
+[[package]]
+name = "mint"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
 
 [[package]]
 name = "naga"

@@ -1,15 +1,12 @@
+pub mod audio;
 pub mod audioinput;
 pub mod timeline;
-pub mod audio;
 
-use chrono::Utc;
-use eframe::egui::{
-        CentralPanel, Context
-    };
-use egui::Button;
-use log::info;
-use crate::{data::audioinput::AudioInputDeviceBuilder, session::Session};
 use crate::config::{Configuration, Settings};
+use crate::{data::audioinput::AudioInputDeviceBuilder, session::Session};
+use chrono::Utc;
+use eframe::egui::{CentralPanel, Context};
+use egui::Button;
 
 use open;
 
@@ -41,7 +38,6 @@ pub trait View {
 
 impl eframe::App for HamSharkGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-
         let begin = Utc::now();
 
         // Top Menu Bar
@@ -64,7 +60,7 @@ impl eframe::App for HamSharkGui {
         // Tool Bar
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             let button = Button::new("➕");
-            let enabled = ! self.session.is_recording();
+            let enabled = !self.session.is_recording();
             if ui.add_enabled(enabled, button).clicked() {
                 self.session.record_new_clip().unwrap();
             }
@@ -108,18 +104,24 @@ impl eframe::App for HamSharkGui {
                 Some(mut data) => {
                     let mut should_save = false;
                     let mut should_cancel = false;
-                    data.show(ui, || {
-                        should_save = true;
-                    }, || {
-                        should_cancel = true;
-                    });
+                    data.show(
+                        ui,
+                        || {
+                            should_save = true;
+                        },
+                        || {
+                            should_cancel = true;
+                        },
+                    );
                     if should_save {
                         let audiodevice = data.build().expect("should have built an audio device");
-                        self.session.configure(audiodevice).expect("should have configured an input device");
+                        self.session
+                            .configure(audiodevice)
+                            .expect("should have configured an input device");
                     } else if !should_cancel {
                         self.audio_input_selecting = Option::Some(data);
                     }
-                },
+                }
                 None => (),
             }
         });

@@ -1,11 +1,23 @@
-use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::Arc};
-use crate::{config::Settings, data::{audio::{self, Clip, ClipId, WavClip}, audioinput::AudioInputDevice}, gui::audio::{ClipExplorer, OpenClips}, pipeline, tools::{self, SampleRecorder}};
-use chrono::{Local};
+use crate::{
+    config::Settings,
+    data::{
+        audio::{self, Clip, ClipId, WavClip},
+        audioinput::AudioInputDevice,
+    },
+    gui::audio::{ClipExplorer, OpenClips},
+    pipeline,
+    tools::{self, SampleRecorder},
+};
+use chrono::Local;
 use hound::{SampleFormat, WavSpec};
 use log::{debug, error, info};
 use parking_lot::RwLock;
-use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::{fs, io};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use thiserror::Error as ThisError;
 
 const SESSIONFILE: &str = "session.toml";
@@ -91,7 +103,10 @@ impl Session {
         }
 
         self.audioconfig = Some(newconfig);
-        debug!("Session configured with audio input device {:?}", self.audioconfig);
+        debug!(
+            "Session configured with audio input device {:?}",
+            self.audioconfig
+        );
 
         if was_recording {
             self.record_new_clip()?;
@@ -115,18 +130,10 @@ impl Session {
                 if let Some(clip_id) = ClipId::from_path_ref(&entry.path()) {
                     match self.clips.entry(clip_id) {
                         std::collections::btree_map::Entry::Vacant(vacant_entry) => {
-                            vacant_entry.insert(
-                                ClipExplorer::new(
-                                    Arc::new(
-                                        RwLock::new(
-                                            WavClip::from_file(
-                                                &entry.path()
-                                            )?
-                                        )
-                                    )
-                                )
-                            );
-                        },
+                            vacant_entry.insert(ClipExplorer::new(Arc::new(RwLock::new(
+                                WavClip::from_file(&entry.path())?,
+                            ))));
+                        }
                         std::collections::btree_map::Entry::Occupied(_) => {}
                     }
                 }
@@ -158,26 +165,21 @@ impl Session {
                     channels: 1,
                     sample_rate: cfg.config.sample_rate.0,
                     bits_per_sample: 16,
-                    sample_format: SampleFormat::Int
+                    sample_format: SampleFormat::Int,
                 };
-                let clip = Arc::new(
-                    RwLock::new(
-                        WavClip::record_new(
-                            clip_id, 
-                            self.path.as_path(), 
-                            spec)?
-                        )
-                    );
-                
+                let clip = Arc::new(RwLock::new(WavClip::record_new(
+                    clip_id,
+                    self.path.as_path(),
+                    spec,
+                )?));
+
                 // Recorder starts as soon as it is created
                 self.recorder = Some(SampleRecorder::new(&cfg, clip.clone())?);
                 vacant_entry.insert(ClipExplorer::new(clip));
 
                 Ok(())
-            },
-            std::collections::btree_map::Entry::Occupied(_) => {
-                Err(Error::AlreadyRecording())
-            },
+            }
+            std::collections::btree_map::Entry::Occupied(_) => Err(Error::AlreadyRecording()),
         }
     }
 
@@ -275,7 +277,7 @@ impl Session {
                     if data_index == data.len() {
                         data_index = 0;
                         break;
-                    } 
+                    }
                 }
             },
             move |err| {
@@ -296,13 +298,5 @@ impl Session {
         };*/
 
         Ok(())
-    }
-
-    pub fn clip(&self, clip_id: &ClipId) -> Result<Clip, Error> {
-        if let Some(clip_editor) = self.clips.get(clip_id) {
-            Ok(clip_editor.clip.clone())
-        } else {
-            Err(Error::NoSuchClip(clip_id.clone()))
-        }
     }
 }

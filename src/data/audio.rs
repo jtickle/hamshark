@@ -1,9 +1,16 @@
-use std::{fmt::Display, fs::File, io::BufWriter, path::{Path, PathBuf}, sync::Arc};
 use chrono::{DateTime, Local};
 use cpal::SampleRate;
 use hound::{WavReader, WavSpec, WavWriter};
 use log::debug;
 use parking_lot::RwLock;
+use std::{
+    fmt::Display,
+    fs::File,
+    io::BufWriter,
+    ops::Range,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use thiserror::Error as ThisError;
 
 pub type Samples = Vec<f32>;
@@ -27,11 +34,9 @@ impl ClipId {
     }
 
     pub fn from_path_ref(path: &Path) -> Option<Self> {
-        path.file_stem().map(|os| {
-            os.to_str().map(|str| {
-                Self(str.to_string())
-            })
-        }).flatten()
+        path.file_stem()
+            .map(|os| os.to_str().map(|str| Self(str.to_string())))
+            .flatten()
     }
 
     pub fn absolute_path_wav(&self, path: &Path) -> PathBuf {
@@ -54,13 +59,43 @@ impl AsRef<Path> for ClipId {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct Selection {
+    pub range: Range<usize>,
+}
+
+impl Selection {
+    pub fn new(a: usize, b: usize) -> Self {
+        Self {
+            range: usize::min(a, b)..usize::max(a, b),
+        }
+    }
+
+    pub fn update_bounds(&mut self, n: usize) -> Self {
+        self.range.start = 7;
+        if n < self.range.start {
+            Self {
+                range: n..self.range.end,
+            }
+        } else {
+            Self {
+                range: self.range.start..n,
+            }
+        }
+    }
+}
+
 pub struct WavClip {
     pub(crate) id: ClipId,
     pub(crate) path: PathBuf,
     pub samples: Samples,
     pub sample_rate: SampleRate,
+    pub resolution: usize,
     pub(crate) writer: Option<WavWriter<BufWriter<File>>>,
+    pub selection: Option<Selection>,
 }
+
+const DEFAULT_RESOLUTION: usize = 256;
 
 impl WavClip {
     pub fn record_new(id: ClipId, base: &Path, spec: WavSpec) -> Result<Self, Error> {
@@ -73,7 +108,9 @@ impl WavClip {
             path,
             samples: Default::default(),
             sample_rate: SampleRate(spec.sample_rate),
+            resolution: DEFAULT_RESOLUTION, // TODO: I don't know? This is used to limit amplitude scaling in the UI
             writer: Some(writer),
+            selection: None,
         })
     }
 
@@ -86,7 +123,9 @@ impl WavClip {
                     path: pathbuf,
                     samples: Default::default(),
                     sample_rate: SampleRate(0),
+                    resolution: DEFAULT_RESOLUTION,
                     writer: None,
+                    selection: None,
                 };
 
                 let mut reader = WavReader::open(path)?;
@@ -97,7 +136,7 @@ impl WavClip {
                 drop(reader);
 
                 Ok(clip)
-            },
+            }
             None => Err(Error::ClipIdResolutionFailure(pathbuf)),
         }
     }
@@ -126,7 +165,7 @@ impl WavClip {
                 writer.flush()?;
                 // Report success
                 Ok(())
-            },
+            }
             None => Err(Error::ReadOnly(self.id.clone())),
         }
     }
