@@ -1,9 +1,15 @@
-use std::sync::Arc;
-use cpal::{traits::{DeviceTrait, StreamTrait}, Stream};
+use crate::data::{
+    audio::{self, Clip},
+    audioinput::AudioInputDevice,
+};
+use cpal::{
+    Stream,
+    traits::{DeviceTrait, StreamTrait},
+};
 use log::error;
 use parking_lot::RwLock;
+use std::sync::Arc;
 use thiserror::Error as ThisError;
-use crate::data::{audio::{self, Clip}, audioinput::AudioInputDevice};
 
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -22,7 +28,6 @@ pub struct SampleRecorder {
     write_error: Arc<RwLock<Option<Error>>>,
 }
 
-
 impl SampleRecorder {
     pub fn new(audioinput: &AudioInputDevice, clip: Clip) -> Result<Self, Error> {
         let write_error = Arc::new(RwLock::new(None));
@@ -32,7 +37,9 @@ impl SampleRecorder {
             {
                 let write_error = write_error.clone();
                 move |data: &[f32], _info| {
-                    if write_error.read().is_some() { return };
+                    if write_error.read().is_some() {
+                        return;
+                    };
 
                     let mut clip_guard = clip.write();
                     if let Err(error) = clip_guard.write_samples(data) {
@@ -43,17 +50,17 @@ impl SampleRecorder {
             {
                 let write_error = write_error.clone();
                 move |err| {
-                    if write_error.read().is_some() { return };
+                    if write_error.read().is_some() {
+                        return;
+                    };
                     *write_error.write() = Some(Error::from(err));
                 }
             },
-            None
+            None,
         ) {
-            Ok(stream) => {
-                match stream.play() {
-                    Ok(_) => stream,
-                    Err(err) => return Err(Error::from(err)),
-                }
+            Ok(stream) => match stream.play() {
+                Ok(_) => stream,
+                Err(err) => return Err(Error::from(err)),
             },
             Err(err) => return Err(Error::from(err)),
         };
@@ -71,7 +78,6 @@ impl SampleRecorder {
         Ok(())
     }
 }
-
 
 pub struct SampleLoader {
     stream: Stream,

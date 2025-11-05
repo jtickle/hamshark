@@ -1,5 +1,8 @@
+use cpal::{
+    BufferSize, Device, Host, HostId, StreamConfig, default_host, host_from_id,
+    traits::{DeviceTrait, HostTrait},
+};
 use std::fmt::Debug;
-use cpal::{default_host, host_from_id, traits::{DeviceTrait, HostTrait}, BufferSize, Device, Host, HostId, StreamConfig};
 
 pub struct AudioInputDevice {
     pub host: Host,
@@ -29,9 +32,9 @@ impl Debug for AudioInputDevice {
 
 impl PartialEq for AudioInputDevice {
     fn eq(&self, other: &Self) -> bool {
-        self.host.id() == other.host.id() &&
-            self.device.name() == other.device.name() &&
-            self.config == other.config
+        self.host.id() == other.host.id()
+            && self.device.name() == other.device.name()
+            && self.config == other.config
     }
 }
 
@@ -49,8 +52,8 @@ impl Default for AudioInputDeviceBuilder {
             device: None,
             config: None,
         }
-            .with_default_device()
-            .with_default_config()
+        .with_default_device()
+        .with_default_config()
     }
 }
 
@@ -79,7 +82,8 @@ impl AudioInputDeviceBuilder {
 
     pub fn get_default_config(&self) -> Option<StreamConfig> {
         self.device.clone().map(|device| {
-            let mut config = device.default_input_config()
+            let mut config = device
+                .default_input_config()
                 .expect("device has not default input config")
                 .config();
             config.buffer_size = BufferSize::Fixed(128);
@@ -93,26 +97,28 @@ impl AudioInputDeviceBuilder {
 
     pub fn input_devices(&self) -> Vec<Device> {
         let host = host_from_id(self.host_id).expect("host must be set at this point");
-        host.input_devices().expect("host must have some input devices").collect()
+        host.input_devices()
+            .expect("host must have some input devices")
+            .collect()
     }
 
     pub fn build(&self) -> Result<AudioInputDevice, AudioInputBuilderIncomplete> {
         let host = match host_from_id(self.host_id) {
             Ok(host) => host,
-            Err(_) => return Result::Err(AudioInputBuilderIncomplete{}),
+            Err(_) => return Result::Err(AudioInputBuilderIncomplete {}),
         };
         let device = match self.device.clone() {
             Some(device) => device,
-            None => return Result::Err(AudioInputBuilderIncomplete{}),
+            None => return Result::Err(AudioInputBuilderIncomplete {}),
         };
         let config = match self.config.clone() {
             Some(config) => config,
-            None => return Result::Err(AudioInputBuilderIncomplete{}),
+            None => return Result::Err(AudioInputBuilderIncomplete {}),
         };
         Ok(AudioInputDevice {
             host,
             device,
-            config
+            config,
         })
     }
 }

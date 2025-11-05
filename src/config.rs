@@ -1,5 +1,8 @@
-use std::{env, fs, path::{Path, PathBuf}};
 use directories::{ProjectDirs, UserDirs};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +24,10 @@ pub struct Configuration {
 
 #[derive(Debug, Error)]
 pub enum ConfigurationError {
-    #[error("Unable to resolve the OS-specific Settings Path automatically. You can specify one in the {} environment variable.", HAMSHARK_SETTINGS_FILE_ENV)]
+    #[error(
+        "Unable to resolve the OS-specific Settings Path automatically. You can specify one in the {} environment variable.",
+        HAMSHARK_SETTINGS_FILE_ENV
+    )]
     SettingsPathResolution,
 }
 
@@ -61,7 +67,7 @@ impl Configuration {
                 // Path is set in environment so we are going to go with it
                 // and if it's invalid, too bad panic
                 PathBuf::from(env_config_path)
-            },
+            }
             None => {
                 // Try auto-determining settings dir from OS paths
                 match ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION) {
@@ -70,7 +76,7 @@ impl Configuration {
                     // Unable to determine where settings should be stored
                     None => return Err(ConfigurationError::SettingsPathResolution),
                 }
-            },
+            }
         };
 
         Ok(Self {
@@ -82,14 +88,12 @@ impl Configuration {
 impl Settings {
     pub fn from_file(file: &Path) -> OwnedSettingsResult {
         match fs::exists(file) {
-            Ok(true) => {
-                match fs::read_to_string(file) {
-                    Ok(serialized) => match toml::from_str(serialized.as_str()) {
-                        Ok(settings) => Ok(settings),
-                        Err(error) => Err(SettingsError::DeserializationError(error)),
-                    },
-                    Err(error) => Err(SettingsError::FileReadError(error)),
-                }
+            Ok(true) => match fs::read_to_string(file) {
+                Ok(serialized) => match toml::from_str(serialized.as_str()) {
+                    Ok(settings) => Ok(settings),
+                    Err(error) => Err(SettingsError::DeserializationError(error)),
+                },
+                Err(error) => Err(SettingsError::FileReadError(error)),
             },
             Ok(false) => {
                 let settings = Settings::from_sensible_defaults();
@@ -110,11 +114,14 @@ impl Settings {
 
     pub fn determine_session_base_dir() -> PathBuf {
         // Get OS-specific document dir and create a directory named Hamshark
-        UserDirs::new().map(|user_dirs| {
-            user_dirs.document_dir().map(|doc_dir| {
-                PathBuf::from(doc_dir).join(APPLICATION)
+        UserDirs::new()
+            .map(|user_dirs| {
+                user_dirs
+                    .document_dir()
+                    .map(|doc_dir| PathBuf::from(doc_dir).join(APPLICATION))
             })
-        }).flatten().expect("Could not determine OS base dir")
+            .flatten()
+            .expect("Could not determine OS base dir")
     }
 
     pub fn save(&self, file: &Path) -> SettingsResult {
@@ -130,7 +137,7 @@ impl Settings {
                     Ok(()) => Ok(()),
                     Err(error) => Err(SettingsError::FileWriteError(error)),
                 }
-            },
+            }
             Err(error) => Err(SettingsError::SerializationError(error)),
         }
     }
