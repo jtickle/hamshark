@@ -5,7 +5,6 @@ use crate::{
         audioinput::AudioInputDevice,
     },
     gui::audio::{ClipExplorer, OpenClips},
-    pipeline,
     tools::{self, SampleRecorder},
 };
 use chrono::Local;
@@ -29,14 +28,8 @@ pub enum Error {
     AlreadyRecording(),
     #[error("No audio configuration provided")]
     NoAudioConfiguration(),
-    #[error("No such clip ID {0}")]
-    NoSuchClip(ClipId),
-    #[error("Clip Already Exists {0}")]
-    ClipAlreadyExists(ClipId),
     #[error("Error creating clip: {0}")]
     CreateClip(#[from] hound::Error),
-    #[error("Pipeline Error: {0}")]
-    Pipeline(#[from] pipeline::Error),
     #[error("Recording Error: {0}")]
     Recording(#[from] tools::Error),
     #[error("Audio Error: {0}")]

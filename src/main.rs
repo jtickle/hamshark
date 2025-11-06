@@ -7,7 +7,6 @@ use log::debug;
 mod config;
 mod data;
 mod gui;
-mod pipeline;
 mod session;
 mod tools;
 
